@@ -4,9 +4,9 @@ This document outlines the phases of development of Acta.
 
 ## Phase 1: Data migration
 
-[ ] Define exact Parquet schema
-[ ] Map existing otel-traces data to schema
-[ ] Create script that migrates traces dump to acta file
+[x] Define exact Parquet schema
+[x] Map existing otel-traces data to schema
+[x] Create script that migrates traces dump to acta file
 
 ## Phase 2: Read path
 
