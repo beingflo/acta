@@ -77,5 +77,4 @@ The following data sources are represented in the dataset and need to be migrate
 - brightness-barometer-living-room
 - heuried-visitors
 - location_florian
-- events
 - marending
