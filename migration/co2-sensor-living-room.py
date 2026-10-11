@@ -6,7 +6,7 @@ Writes migration/out/<source>.parquet with the acta schema:
 
 Requires duckdb >= 1.5 (VARIANT type).
 
-Usage: python migration/migrate.py
+Usage: python migration/co2-sensor-living-room.py
 """
 
 import pathlib
