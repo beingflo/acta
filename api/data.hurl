@@ -21,7 +21,7 @@ jsonpath "$" contains "marending"
 POST {{host}}/api/data
 Content-Type: application/json
 {
-  "sql": "SELECT coalesce(to_json(array_agg(struct_pack(t := epoch(b), s0 := s0) ORDER BY b)), '[]'::JSON)::VARCHAR FROM (SELECT time_bucket(INTERVAL '1 hour', CAST(timestamp AS TIMESTAMP)) AS b, avg(data.co2) AS s0 FROM events WHERE source = 'co2-sensor-living-room' AND timestamp >= TIMESTAMPTZ '2026-10-10T00:00:00.000Z' AND timestamp < TIMESTAMPTZ '2026-10-11T00:00:00.000Z' GROUP BY 1)"
+  "sql": "SELECT coalesce(to_json(array_agg(struct_pack(t := epoch(b), s0 := s0) ORDER BY b)), '[]'::JSON)::VARCHAR FROM (SELECT time_bucket(INTERVAL '1 hour', CAST(timestamp AS TIMESTAMP)) AS b, avg(data.co2::BIGINT) AS s0 FROM events WHERE source = 'co2-sensor-living-room' AND timestamp >= TIMESTAMPTZ '2026-10-10T00:00:00.000Z' AND timestamp < TIMESTAMPTZ '2026-10-11T00:00:00.000Z' GROUP BY 1)"
 }
 HTTP 200
 [Asserts]
@@ -35,7 +35,7 @@ jsonpath "$[0].s0" isNumber
 POST {{host}}/api/data
 Content-Type: application/json
 {
-  "sql": "SELECT coalesce(to_json(array_agg(struct_pack(t := epoch(b), s0 := s0) ORDER BY b)), '[]'::JSON)::VARCHAR FROM (SELECT time_bucket(INTERVAL '1 hour', CAST(timestamp AS TIMESTAMP)) AS b, avg(data) AS s0 FROM events WHERE source = 'heuried-visitors' AND timestamp >= TIMESTAMPTZ '2026-10-10T00:00:00.000Z' AND timestamp < TIMESTAMPTZ '2026-10-11T00:00:00.000Z' GROUP BY 1)"
+  "sql": "SELECT coalesce(to_json(array_agg(struct_pack(t := epoch(b), s0 := s0) ORDER BY b)), '[]'::JSON)::VARCHAR FROM (SELECT time_bucket(INTERVAL '1 hour', CAST(timestamp AS TIMESTAMP)) AS b, avg(data::BIGINT) AS s0 FROM events WHERE source = 'heuried-visitors' AND timestamp >= TIMESTAMPTZ '2026-10-10T00:00:00.000Z' AND timestamp < TIMESTAMPTZ '2026-10-11T00:00:00.000Z' GROUP BY 1)"
 }
 HTTP 200
 [Asserts]
@@ -48,7 +48,7 @@ jsonpath "$[0].s0" isNumber
 POST {{host}}/api/data
 Content-Type: application/json
 {
-  "sql": "SELECT coalesce(to_json(array_agg(struct_pack(t := epoch(b), s0 := s0) ORDER BY b)), '[]'::JSON)::VARCHAR FROM (SELECT time_bucket(INTERVAL '1 hour', CAST(timestamp AS TIMESTAMP)) AS b, avg(data.co2) AS s0 FROM events WHERE source = 'co2-sensor-living-room' AND timestamp >= TIMESTAMPTZ '2000-01-01T00:00:00.000Z' AND timestamp < TIMESTAMPTZ '2000-01-02T00:00:00.000Z' GROUP BY 1)"
+  "sql": "SELECT coalesce(to_json(array_agg(struct_pack(t := epoch(b), s0 := s0) ORDER BY b)), '[]'::JSON)::VARCHAR FROM (SELECT time_bucket(INTERVAL '1 hour', CAST(timestamp AS TIMESTAMP)) AS b, avg(data.co2::BIGINT) AS s0 FROM events WHERE source = 'co2-sensor-living-room' AND timestamp >= TIMESTAMPTZ '2000-01-01T00:00:00.000Z' AND timestamp < TIMESTAMPTZ '2000-01-02T00:00:00.000Z' GROUP BY 1)"
 }
 HTTP 200
 [Asserts]

@@ -1,12 +1,19 @@
-"""Run every per-source migration, then combine the results into one Parquet file.
+"""Run every per-source migration, then combine the results into `data/data.parquet`.
 
 Each <source>.py writes migration/out/<source>.parquet. This script runs them all
-and then writes migration/data.parquet containing every row, sorted by timestamp.
+and then writes one combined file, sorted by source and then timestamp.
 
-Sorting matters: the per-source files are written unordered, so their Parquet row
-groups span the whole date range and can't be pruned. The combined file is written
-sorted and with preserve_insertion_order on, so each row group covers a contiguous
-slice of time and range scans on `timestamp` can skip row groups.
+Sorting by source first is what makes the read path fast:
+
+  * Row-group statistics on `source` let a `source = ...` filter skip every other
+    source's row groups. A file interleaved by timestamp has no such pruning, so
+    every query scans (and Variant-decodes) every source's rows.
+  * Keeping a source's rows contiguous keeps the Variant layout homogeneous
+    within a row group, which Parquet can shred. Grouping by source also
+    compresses better: the combined file is ~65 MB versus ~99 MB sorted by time.
+
+Timestamps stay ordered within each source, so a `timestamp` range still prunes
+row groups inside a source's block.
 
 Usage: python migration/migrate_all.py
 """
@@ -18,7 +25,8 @@ import duckdb
 
 HERE = pathlib.Path(__file__).resolve().parent
 OUT = HERE / "out"
-FINAL = HERE / "data.parquet"
+DATA = HERE.parent / "data"
+FINAL = DATA / "data.parquet"
 ROW_GROUP_SIZE = 250_000
 
 SOURCES = [
@@ -34,6 +42,8 @@ for name in SOURCES:
     print(f"=== {name} ===", flush=True)
     subprocess.run([sys.executable, str(HERE / name)], check=True)
 
+DATA.mkdir(exist_ok=True)
+
 con = duckdb.connect()
 con.execute("SET threads=8")
 con.execute("SET memory_limit='8GB'")
@@ -44,7 +54,7 @@ con.execute(f"""
     COPY (
         SELECT timestamp, source, data
         FROM read_parquet('{OUT}/*.parquet')
-        ORDER BY timestamp
+        ORDER BY source, timestamp
     ) TO '{FINAL}' (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE {ROW_GROUP_SIZE})
 """)
 
@@ -55,30 +65,25 @@ rows, first, last = con.sql(
 ).fetchone()
 assert rows == expected, f"wrote {rows} rows, expected {expected}"
 
+# timestamps are ordered within every source
 out_of_order = con.sql(f"""
     SELECT count(*) FROM (
-        SELECT timestamp, lag(timestamp) OVER (ORDER BY file_row_number) AS prev
+        SELECT timestamp, lag(timestamp) OVER (PARTITION BY source ORDER BY file_row_number) AS prev
         FROM read_parquet('{FINAL}', file_row_number=true)
     ) WHERE prev IS NOT NULL AND timestamp < prev
 """).fetchone()[0]
-assert out_of_order == 0, f"{out_of_order} rows are out of order"
+assert out_of_order == 0, f"{out_of_order} rows are out of order within a source"
 
-rgs = con.sql(f"""
-    SELECT row_group_id, row_group_num_rows,
-           CAST(stats_min AS TIMESTAMPTZ) AS lo, CAST(stats_max AS TIMESTAMPTZ) AS hi
+# row groups hold a single source, so `source = ...` prunes them. A few boundary
+# row groups may straddle two sources; that is negligible.
+mixed, total_rgs = con.sql(f"""
+    SELECT count(*) FILTER (WHERE stats_min <> stats_max), count(*)
     FROM parquet_metadata('{FINAL}')
-    WHERE path_in_schema = 'timestamp'
-    ORDER BY row_group_id
-""").fetchall()
-assert rgs, "no row groups found"
-for i in range(1, len(rgs)):
-    assert rgs[i][2] >= rgs[i - 1][3], f"row group {i} overlaps row group {i-1}"
+    WHERE path_in_schema = 'source'
+""").fetchone()
 
 print(f"\n{FINAL.name}: {rows:,} rows, {first:%Y-%m-%d} .. {last:%Y-%m-%d}, "
-      f"{len(rgs)} row groups, {FINAL.stat().st_size / 1e6:.0f} MB")
-print("rows per source in the combined file:")
+      f"{FINAL.stat().st_size / 1e6:.0f} MB, {total_rgs} row groups ({mixed} mixed-source)")
+print("rows per source:")
 for r in con.sql(f"SELECT source, count(*) n FROM '{FINAL}' GROUP BY 1 ORDER BY 1").fetchall():
     print(f"   {r[0]:34} {r[1]:>10,}")
-print("row groups (contiguous time slices):")
-for r in rgs:
-    print(f"   rg {r[0]:>3}  {r[1]:>7,} rows  {r[2]:%Y-%m-%d} .. {r[3]:%Y-%m-%d}")

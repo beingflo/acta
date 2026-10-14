@@ -5,53 +5,49 @@
 }
 
 .app-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 20px;
-  border-bottom: 1px solid #262b36;
   position: sticky;
   top: 0;
-  background: #14171d;
   z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 24px;
+  background: #fff;
+  border-bottom: 1px solid #eeeeee;
 }
 
 .app-header h1 {
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
   margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .spacer {
   flex: 1;
 }
 
-.dashboard-button,
-.presets button,
-.custom-range input {
-  background: #1b2029;
-  border: 1px solid #2c333f;
-  border-radius: 6px;
-  padding: 5px 10px;
-  cursor: pointer;
-}
-
 .dashboard-button {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-weight: 600;
+  font-size: 13px;
+  color: #4a4a4a;
+}
+
+.dashboard-button:hover {
+  color: #111;
 }
 
 kbd {
-  font-size: 11px;
-  color: #8b93a1;
-  border: 1px solid #2c333f;
-  border-radius: 4px;
   padding: 1px 5px;
+  font-size: 10px;
+  color: #b0b0b0;
+  border: 1px solid #eeeeee;
+  border-radius: 4px;
 }
 
+/* Date range picker: plain text buttons, only the active one is boxed. */
 .range-picker {
   position: relative;
   display: flex;
@@ -66,53 +62,90 @@ kbd {
 }
 
 .presets button {
-  min-width: 40px;
-  text-align: center;
-  color: #b6bdc9;
+  padding: 4px 10px;
+  font-size: 13px;
+  line-height: 1;
+  color: #6e6e6e;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+.presets button:hover {
+  color: #333;
 }
 
 .presets button.active {
-  background: #2f6feb;
-  border-color: #2f6feb;
-  color: #fff;
+  color: #111;
+  border-color: #9a9a9a;
 }
 
 .custom-range {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   position: absolute;
   top: 100%;
   right: 0;
   margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 10px;
-  background: #1b2029;
-  border: 1px solid #2c333f;
+  background: #fff;
+  border: 1px solid #eeeeee;
   border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
+}
+
+.custom-range input {
+  padding: 5px 8px;
+  font-size: 12px;
+  background: #fff;
+  border: 1px solid #eeeeee;
+  border-radius: 6px;
 }
 
 main {
   flex: 1;
-  padding: 20px;
+  padding: 24px;
 }
 
 .dashboard {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.tile.wide {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 720px) {
+  .dashboard {
+    grid-template-columns: 1fr;
+  }
 }
 
 .tile {
-  background: #1a1e26;
-  border: 1px solid #262b36;
+  padding: 18px 20px 8px;
+  background: #fff;
+  border: 1px solid #e8e8e8;
   border-radius: 10px;
-  padding: 14px 16px 8px;
 }
 
 .tile-title {
-  font-size: 14px;
-  font-weight: 600;
-  margin-bottom: 10px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+}
+
+.tile-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tile-ylabel {
+  font-size: 11px;
+  color: #333;
 }
 
 .tile-chart {
@@ -122,41 +155,41 @@ main {
 .palette-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  z-index: 100;
   display: flex;
   justify-content: center;
   padding-top: 18vh;
-  z-index: 100;
+  background: rgba(0, 0, 0, 0.18);
 }
 
 .palette {
-  width: min(420px, 90vw);
-  height: fit-content;
-  background: #1b2029;
-  border: 1px solid #2c333f;
-  border-radius: 10px;
-  overflow: hidden;
   display: flex;
   flex-direction: column;
+  width: min(420px, 90vw);
+  height: fit-content;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #eeeeee;
+  border-radius: 10px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.12);
 }
 
 .palette input {
-  border: 0;
-  border-bottom: 1px solid #2c333f;
-  background: transparent;
   padding: 12px 14px;
+  font-size: 14px;
+  border: 0;
+  border-bottom: 1px solid #f0f0f0;
   outline: none;
 }
 
 .palette button {
-  text-align: left;
-  background: transparent;
-  border: 0;
   padding: 10px 14px;
-  cursor: pointer;
+  font-size: 14px;
+  color: #333;
+  text-align: left;
 }
 
 .palette button.active,
 .palette button:hover {
-  background: #242b36;
+  background: #f6f6f6;
 }

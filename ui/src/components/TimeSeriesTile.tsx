@@ -8,6 +8,7 @@ import { range, setCustomRange } from '../lib/range'
 
 const REFRESH_MS = 30_000
 const JITTER_MS = 5_000
+const AXIS_FONT = '11px ui-sans-serif, system-ui, sans-serif'
 
 export default function TimeSeriesTile(props: {
   title: string
@@ -15,6 +16,7 @@ export default function TimeSeriesTile(props: {
   series: Series[]
   yLabel?: string
   height?: number
+  wide?: boolean
 }) {
   const height = () => props.height ?? 300
 
@@ -27,22 +29,23 @@ export default function TimeSeriesTile(props: {
     width: chartWidth,
     height: height(),
     pxAlign: 0,
-    series: [
-      {},
-      ...props.series.map((s) => ({ label: s.label, stroke: s.stroke, width: 1.5 })),
-    ],
+    series: [{}, ...props.series.map((s) => ({ label: s.label, stroke: s.stroke, width: 1 }))],
     axes: [
-      { stroke: '#8b93a1', grid: { stroke: '#262b36' }, ticks: { stroke: '#262b36' } },
       {
-        label: props.yLabel,
-        labelSize: 20,
-        stroke: '#8b93a1',
-        grid: { stroke: '#262b36' },
-        ticks: { stroke: '#262b36' },
+        stroke: '#222',
+        font: AXIS_FONT,
+        grid: { show: false },
+        ticks: { stroke: '#e0e0e0', width: 1 },
+      },
+      {
+        stroke: '#222',
+        font: AXIS_FONT,
+        grid: { stroke: '#f0f0f0', width: 1 },
+        ticks: { stroke: '#e0e0e0', width: 1 },
       },
     ],
     scales: { x: { time: true } },
-    legend: { live: true },
+    legend: { show: props.series.length > 1 },
     cursor: { drag: { x: true, y: false, setScale: false } },
     hooks: {
       setSelect: [
@@ -119,9 +122,12 @@ export default function TimeSeriesTile(props: {
   })
 
   return (
-    <section class="tile">
+    <section class="tile" classList={{ wide: props.wide }}>
       <header class="tile-title">{props.title}</header>
-      <div class="tile-chart" ref={container} />
+      <div class="tile-body">
+        {props.yLabel && <div class="tile-ylabel">↑ {props.yLabel}</div>}
+        <div class="tile-chart" ref={container} />
+      </div>
     </section>
   )
 }

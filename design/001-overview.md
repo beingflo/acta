@@ -28,7 +28,9 @@ queries to derive data are supported, like geofence queries on GPS data to deter
 The Rust HTTP service accepts arbitrary JSON data and buffers it in memory for some seconds. Then, it writes the
 data to a small Parquet file where the payload is stored semi-structured using the Variant type.
 
-Periodically, the service aggregates the small files and writes back bigger, e.g., hourly and then daily files.
+Periodically, the service aggregates the small files and writes back bigger, e.g., hourly and then daily files, sorted
+by source and then time. Grouping a source's rows together keeps each row group's Variant payload homogeneous and lets
+the read path skip other sources' row groups entirely.
 
 ### Operation
 

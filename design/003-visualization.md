@@ -13,6 +13,9 @@ interaction is a requirement).
 The frontend owns the queries: every tile knows the SQL it runs. The service only executes SQL and returns the result,
 it has no notion of dashboards, tiles or metrics.
 
+The read path reads `data/*.parquet`. The file is sorted by source and then time, so a `source = ...` filter prunes
+every other source's row groups and each row group's Variant payload stays homogeneous enough to shred.
+
 ## API
 
 The API consists of a single endpoint that accepts an SQL query in DuckDB dialect and returns the JSON document the
@@ -40,6 +43,10 @@ responses small.
 Buckets are UTC-aligned and the browser renders timestamps in the viewer's local timezone. The service's DuckDB build
 has no ICU extension, so timestamps are cast to a naive UTC timestamp before any time function is used.
 
+Variant fields must be cast to their concrete type before aggregating. DuckDB aggregates over a raw floating-point
+Variant field are silently wrong: `avg(data.temperature)` returns 21.0 where `avg(data.temperature::DOUBLE)` returns
+21.23. Integer-typed fields happen to be correct either way, but cast them too for consistency.
+
 ## Authentication
 
 TODO
@@ -56,7 +63,20 @@ The following dashboards are implemented:
 
 ### Home
 
-A single full-width tile containing the CO2 chart fed by the `co2-sensor-living-room` data source. The chart has time on the X axis and CO2 ppm on the Y axis.
+The CO2 tile spans the full width. The other tiles are half width, two per row.
+
+- CO2 (`co2-sensor-living-room`) time x co2 ppm
+- Temperature (`co2-sensor-living-room`) time x temperature °C
+- Brightness (`brightness-barometer-living-room`) time x lux
+- Humidity (`co2-sensor-living-room`) time x humidity %
+- Pressure (`brightness-barometer-living-room`) time x pressure hPa
+
+All five series come from the two living room sensors: `co2-sensor-living-room` (co2, temperature, humidity) and
+`brightness-barometer-living-room` (lux, pressure, temperature).
+
+### Heuried
+
+A single full-width tile containing a visitor chart fed by the `heuried-visitors` data source. The chart has time on the X axis and visitors on the Y axis.
 
 ### TODO add more later
 

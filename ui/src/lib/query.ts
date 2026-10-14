@@ -4,6 +4,11 @@ import type uPlot from 'uplot'
 
 export type Series = {
   label: string
+  /**
+   * Raw DuckDB aggregate expression. Cast Variant fields to their concrete type
+   * before aggregating: aggregates over a raw floating-point Variant field are
+   * silently wrong (e.g. `avg(data.temperature)` vs `avg(data.temperature::DOUBLE)`).
+   */
   expr: string
   stroke: string
 }

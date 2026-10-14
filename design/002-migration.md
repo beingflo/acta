@@ -78,3 +78,14 @@ The following data sources are represented in the dataset and need to be migrate
 - heuried-visitors
 - location_florian
 - marending
+
+## Output layout
+
+Partial results are written to `migration/out/<source>.parquet` and combined into a single `data/data.parquet`, sorted
+by source and then timestamp, with 250k-row row groups.
+
+Sorting by source first is what makes reads fast. Row-group statistics on `source` let a `source = ...` filter skip
+every other source's row groups, and keeping a source's rows contiguous keeps the Variant layout homogeneous within a
+row group so Parquet can shred it. A file interleaved by timestamp decodes roughly 10x slower per row, because every
+query scans (and Variant-decodes) every source. Grouping by source also compresses better: ~65 MB versus ~99 MB.
+See `design/003-visualization.md`.

@@ -1,13 +1,19 @@
-import { createSignal, For, onCleanup, onMount } from 'solid-js'
+import { createEffect, createSignal, For, onCleanup, onMount } from 'solid-js'
 
 import { DASHBOARDS } from '../dashboards'
 
 export default function DashboardPicker(props: { active: string; onSelect: (id: string) => void }) {
   const [open, setOpen] = createSignal(false)
   const [query, setQuery] = createSignal('')
+  let searchRef: HTMLInputElement | undefined
 
   const filtered = () =>
     DASHBOARDS.filter((dashboard) => dashboard.title.toLowerCase().includes(query().toLowerCase()))
+
+  const openPalette = () => {
+    setQuery('')
+    setOpen(true)
+  }
 
   const select = (id: string) => {
     props.onSelect(id)
@@ -15,11 +21,18 @@ export default function DashboardPicker(props: { active: string; onSelect: (id: 
     setQuery('')
   }
 
+  // Focus the search field whenever the palette opens. `autofocus` is not
+  // reliable for elements inserted after page load.
+  createEffect(() => {
+    if (open()) searchRef?.focus()
+  })
+
   onMount(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
-        setOpen((value) => !value)
+        if (open()) setOpen(false)
+        else openPalette()
       } else if (event.key === 'Escape') {
         setOpen(false)
       } else if (event.key === 'Enter' && open()) {
@@ -33,7 +46,7 @@ export default function DashboardPicker(props: { active: string; onSelect: (id: 
 
   return (
     <>
-      <button class="dashboard-button" onClick={() => setOpen(true)}>
+      <button class="dashboard-button" onClick={openPalette}>
         {DASHBOARDS.find((dashboard) => dashboard.id === props.active)?.title ?? 'Dashboard'}
         <kbd>⌘K</kbd>
       </button>
@@ -41,7 +54,7 @@ export default function DashboardPicker(props: { active: string; onSelect: (id: 
         <div class="palette-backdrop" onClick={() => setOpen(false)}>
           <div class="palette" onClick={(event) => event.stopPropagation()}>
             <input
-              autofocus
+              ref={searchRef}
               placeholder="Go to dashboard…"
               value={query()}
               onInput={(event) => setQuery(event.currentTarget.value)}
