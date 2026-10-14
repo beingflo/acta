@@ -11,7 +11,8 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 14px 24px;
+  height: var(--header-height);
+  padding: 0 24px;
   background: #fff;
   border-bottom: 1px solid #eeeeee;
 }
@@ -23,13 +24,14 @@
 .dashboard-button {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: #4a4a4a;
+  font-size: 20px;
+  font-weight: 400;
+  color: #111;
+  letter-spacing: -0.01em;
 }
 
 .dashboard-button:hover {
-  color: #111;
+  color: #000;
 }
 
 /* Date range picker: plain text buttons, only the active one is boxed. */
@@ -47,12 +49,15 @@
 }
 
 .presets button {
-  padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 10px;
   font-size: 13px;
-  line-height: 1;
   color: #6e6e6e;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 3px;
 }
 
 .presets button:hover {
@@ -61,7 +66,7 @@
 
 .presets button.active {
   color: #111;
-  border-color: #9a9a9a;
+  border-color: #555555;
 }
 
 .custom-range {
@@ -109,10 +114,44 @@ main {
 }
 
 .tile {
+  position: relative;
   padding: 18px 20px 8px;
   background: #fff;
-  border: 1px solid #e8e8e8;
-  border-radius: 10px;
+  border: 1px solid #c9c9c9;
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+/* A maximized tile fills the viewport below the header, which stays visible. */
+.tile.fullscreen {
+  position: fixed;
+  top: var(--header-height);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 18px 24px 8px;
+  overflow: hidden;
+}
+
+body.fullscreen-tile {
+  overflow: hidden;
+}
+
+.tile-close {
+  position: absolute;
+  top: 8px;
+  right: 16px;
+  font-size: 22px;
+  line-height: 1;
+  color: #c8c8c8;
+}
+
+.tile-close:hover {
+  color: #333;
 }
 
 .tile-title {

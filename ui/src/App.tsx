@@ -5,6 +5,7 @@ import DashboardPicker from './components/DashboardPicker'
 import RangePicker from './components/RangePicker'
 import { DASHBOARDS } from './dashboards'
 import { fetchData } from './lib/api'
+import { fullscreenTile, installFullscreenShortcuts } from './lib/fullscreen'
 import { customRange, preset, setLatestData } from './lib/range'
 import { applyRangeFromUrl, dashboardPath, rangeQuery, readDashboard, writeUrl } from './lib/url'
 import './App.css'
@@ -21,6 +22,9 @@ export default function App() {
   onMount(() => {
     window.addEventListener('popstate', syncFromUrl)
     onCleanup(() => window.removeEventListener('popstate', syncFromUrl))
+
+    const uninstallFullscreen = installFullscreenShortcuts()
+    onCleanup(uninstallFullscreen)
 
     void fetchData<number>(
       'SELECT to_json(epoch(CAST(max(timestamp) AS TIMESTAMP)))::VARCHAR FROM events',
@@ -51,6 +55,11 @@ export default function App() {
       { defer: true },
     ),
   )
+
+  // Prevent the page behind a maximized tile from scrolling.
+  createEffect(() => {
+    document.body.classList.toggle('fullscreen-tile', fullscreenTile() !== null)
+  })
 
   return (
     <div class="app">

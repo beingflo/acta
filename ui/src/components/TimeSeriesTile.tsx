@@ -1,14 +1,18 @@
-import { createEffect, createSignal, onCleanup, onMount } from 'solid-js'
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from 'solid-js'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 
 import { fetchData } from '../lib/api'
+import { exitFullscreen, fullscreenTile, setHoveredTile } from '../lib/fullscreen'
 import { bucketFor, timeSeriesSql, toAligned, type Series } from '../lib/query'
 import { range, setCustomRange } from '../lib/range'
 
 const REFRESH_MS = 30_000
 const JITTER_MS = 5_000
 const AXIS_FONT = '11px ui-sans-serif, system-ui, sans-serif'
+const DEFAULT_HEIGHT = 300
+// Header height (`--header-height`) plus the tile's own title, label and padding.
+const FULLSCREEN_CHROME = 130
 
 export default function TimeSeriesTile(props: {
   title: string
@@ -18,7 +22,13 @@ export default function TimeSeriesTile(props: {
   height?: number
   wide?: boolean
 }) {
-  const height = () => props.height ?? 300
+  const id = props.title
+  // A memo (not a plain accessor) so toggling one tile does not re-run every
+  // other tile's effects.
+  const isFullscreen = createMemo(() => fullscreenTile() === id)
+  const [viewport, setViewport] = createSignal(window.innerHeight)
+  const height = () =>
+    isFullscreen() ? viewport() - FULLSCREEN_CHROME : (props.height ?? DEFAULT_HEIGHT)
 
   let container!: HTMLDivElement
   let chart: uPlot | undefined
@@ -74,25 +84,25 @@ export default function TimeSeriesTile(props: {
       to,
     })
 
-    const id = ++requestId
+    const request = ++requestId
     try {
       const rows = await fetchData<Array<Record<string, number | string>>>(sql)
-      if (id !== requestId || !chart) return
+      if (request !== requestId || !chart) return
       chart.setData(toAligned(rows ?? [], props.series.length))
     } catch (error) {
-      if (id === requestId) console.error(`tile "${props.title}" query failed`, error)
+      if (request === requestId) console.error(`tile "${props.title}" query failed`, error)
     }
   }
 
   onMount(() => {
     const observer = new ResizeObserver((entries) => {
       const next = Math.floor(entries[0].contentRect.width)
-      if (next > 0) {
-        setWidth(next)
-        chart?.setSize({ width: next, height: height() })
-      }
+      if (next > 0) setWidth(next)
     })
     observer.observe(container)
+
+    const onViewportResize = () => setViewport(window.innerHeight)
+    window.addEventListener('resize', onViewportResize)
 
     let timer = 0
     const schedule = () => {
@@ -105,9 +115,11 @@ export default function TimeSeriesTile(props: {
 
     onCleanup(() => {
       observer.disconnect()
+      window.removeEventListener('resize', onViewportResize)
       clearTimeout(timer)
       chart?.destroy()
       chart = undefined
+      if (isFullscreen()) exitFullscreen()
     })
   })
 
@@ -121,9 +133,26 @@ export default function TimeSeriesTile(props: {
     void load()
   })
 
+  // Keep the plot matched to the tile, including when it goes fullscreen.
+  createEffect(() => {
+    const chartWidth = width()
+    const chartHeight = height()
+    if (chart && chartWidth > 0) chart.setSize({ width: chartWidth, height: chartHeight })
+  })
+
   return (
-    <section class="tile" classList={{ wide: props.wide }}>
+    <section
+      class="tile"
+      classList={{ wide: props.wide, fullscreen: isFullscreen() }}
+      onMouseEnter={() => setHoveredTile(id)}
+      onMouseLeave={() => setHoveredTile(null)}
+    >
       <header class="tile-title">{props.title}</header>
+      <Show when={isFullscreen()}>
+        <button class="tile-close" onClick={exitFullscreen} aria-label="Exit fullscreen">
+          ×
+        </button>
+      </Show>
       <div class="tile-body">
         {props.yLabel && <div class="tile-ylabel">↑ {props.yLabel}</div>}
         <div class="tile-chart" ref={container} />

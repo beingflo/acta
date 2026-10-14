@@ -17,7 +17,8 @@ The read path reads `data/*.parquet`. The file is sorted by source and then time
 every other source's row groups and each row group's Variant payload stays homogeneous enough to shred.
 
 The UI is light-mode only and deliberately minimal: white cards with hairline borders, text-only controls, centered
-tile titles, and one thin black line per series.
+tile titles, and one thin black line per series. Hovering a tile and pressing `v` expands it to fill the viewport;
+`v`, `Escape` or the tile's × restores it.
 
 ## API
 
