@@ -16,6 +16,9 @@ it has no notion of dashboards, tiles or metrics.
 The read path reads `data/*.parquet`. The file is sorted by source and then time, so a `source = ...` filter prunes
 every other source's row groups and each row group's Variant payload stays homogeneous enough to shred.
 
+The UI is light-mode only and deliberately minimal: white cards with hairline borders, text-only controls, centered
+tile titles, and one thin black line per series.
+
 ## API
 
 The API consists of a single endpoint that accepts an SQL query in DuckDB dialect and returns the JSON document the
@@ -29,6 +32,10 @@ POST /api/data
 The query serializes its own result, e.g. `SELECT to_json(...)`. Producing JSON inside DuckDB keeps VARIANT values on
 the database side — DuckDB 1.5 cannot export VARIANT to Arrow — and lets each tile shape the response exactly as its
 chart needs it.
+
+Queries run against a small pool of read-only, in-memory DuckDB connections, each exposing an `events` view over the
+data directory. External file access is limited to that directory and the configuration is locked after setup; every
+query runs under a timeout and a maximum response size.
 
 ## Queries
 
@@ -53,8 +60,8 @@ TODO
 
 ## Dashboards
 
-Dashboards make up the primary interface of the visualization frontend. Each dashboard has a bold title with a multitude of
-tiles containing charts or scalar values.
+Dashboards make up the primary interface of the visualization frontend. The active dashboard is named in the header
+picker. Each dashboard is a grid of tiles; a tile has a centered title above its chart.
 Dashboards are hardcoded in the application, no dynamic configuration needed and no user modifiability.
 
 Dashboards can be switched by hitting cmd+k: This pops up a command-palette like selector where all available dashboards are listed.
@@ -105,3 +112,8 @@ All visible charts are auto-refreshed every 30s, with random jitter to spread th
 ## Architecture
 
 For simplicty of deployment, the service serves the frontend bundle as well as the API.
+
+## Testing
+
+Crude API scenarios live in `api/*.hurl` and run with `mise run test` against a running service (`ACTA_URL` overrides
+the target). They cover the sources list, a bucketed series, an empty range, and the error contract.

@@ -1,7 +1,7 @@
 # Data migration
 
 Described here is a one time migration needed to bring data from an old Clickhouse-based system into acta.
-The goal is to have SQL / python scripts that take a `traces.parquet` file and produce a `data.parquet` file
+The goal is to have SQL / python scripts that take a `traces.parquet` file and produce the `data/` Parquet files
 with a new schema.
 This functionality will not be needed in the final acta application.
 
@@ -78,6 +78,15 @@ The following data sources are represented in the dataset and need to be migrate
 - heuried-visitors
 - location_florian
 - marending
+
+Their payload shapes:
+
+- `co2-sensor-living-room`: `{ co2, humidity, temperature }`
+- `humidity-laundry-room`: `{ humidity, temperature }`
+- `brightness-barometer-living-room`: `{ absolute_pressure, lux, pressure, temperature }`
+- `heuried-visitors`: a bare integer (visitor count)
+- `location_florian`: a GeoJSON Feature; position fixes plus a few `"type": "trip"` summaries
+- `marending`: `{ method, uri, user_agent, referrer, status, latency_ns, errors? }`
 
 ## Output layout
 
