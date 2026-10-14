@@ -70,9 +70,11 @@ The CO2 tile spans the full width. The other tiles are half width, two per row.
 - Brightness (`brightness-barometer-living-room`) time x lux
 - Humidity (`co2-sensor-living-room`) time x humidity %
 - Pressure (`brightness-barometer-living-room`) time x pressure hPa
+- Humidity laundry room (`humidity-laundry-room`) time x humidity %
+- Temperature laundry room (`humidity-laundry-room`) time x temperature °C
 
-All five series come from the two living room sensors: `co2-sensor-living-room` (co2, temperature, humidity) and
-`brightness-barometer-living-room` (lux, pressure, temperature).
+The tiles are fed by three sensors: `co2-sensor-living-room` (co2, temperature, humidity),
+`brightness-barometer-living-room` (lux, pressure, temperature) and `humidity-laundry-room` (humidity, temperature).
 
 ### Heuried
 
@@ -87,6 +89,11 @@ As an example, the 30d button sets the selected time range to `[now - 30d, now]`
 
 All chart tiles that have a time axis update to reflect the selected timerange. By default the 1d option is selected.
 The frontend resolves the selection to concrete timestamps and embeds them into every tile query.
+
+The selected dashboard and range are reflected in the URL: the dashboard as a path (`/home`, `/heuried`) and the
+range as a query parameter, using a shorthand for presets (`?range=30d`) or ISO from/to for a custom range
+(`?from=2026-10-10T00:00:00.000Z&to=2026-10-11T00:00:00.000Z`). The URL is read on load and on back/forward;
+dashboard switches push a history entry while range changes replace the current one.
 
 Relative ranges end at the wall clock, unless the data has not received a point recently, in which case they end at the
 newest available point. A stalled dataset then shows its latest window instead of an empty chart.

@@ -16,13 +16,6 @@
   border-bottom: 1px solid #eeeeee;
 }
 
-.app-header h1 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
 .spacer {
   flex: 1;
 }
@@ -37,14 +30,6 @@
 
 .dashboard-button:hover {
   color: #111;
-}
-
-kbd {
-  padding: 1px 5px;
-  font-size: 10px;
-  color: #b0b0b0;
-  border: 1px solid #eeeeee;
-  border-radius: 4px;
 }
 
 /* Date range picker: plain text buttons, only the active one is boxed. */
@@ -189,7 +174,11 @@ main {
   text-align: left;
 }
 
-.palette button.active,
-.palette button:hover {
-  background: #f6f6f6;
+.palette button.current {
+  font-weight: 600;
+}
+
+.palette button.highlighted {
+  background: #e4e4e4;
+  color: #000;
 }

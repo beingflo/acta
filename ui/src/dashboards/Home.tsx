@@ -2,6 +2,7 @@ import TimeSeriesTile from '../components/TimeSeriesTile'
 
 const LIVING_ROOM = 'co2-sensor-living-room'
 const BAROMETER = 'brightness-barometer-living-room'
+const LAUNDRY_ROOM = 'humidity-laundry-room'
 
 // Variant fields are cast to their concrete type before aggregating: DuckDB's
 // aggregates over a raw floating-point Variant field are silently wrong, e.g.
@@ -40,6 +41,18 @@ export default function Home() {
         source={BAROMETER}
         series={[{ label: 'Pressure', expr: 'avg(data.pressure::DOUBLE)', stroke: '#111' }]}
         yLabel="Pressure [hPa]"
+      />
+      <TimeSeriesTile
+        title="Laundry room humidity"
+        source={LAUNDRY_ROOM}
+        series={[{ label: 'Humidity', expr: 'avg(data.humidity::DOUBLE)', stroke: '#111' }]}
+        yLabel="Humidity [%]"
+      />
+      <TimeSeriesTile
+        title="Laundry room temperature"
+        source={LAUNDRY_ROOM}
+        series={[{ label: 'Temperature', expr: 'avg(data.temperature::DOUBLE)', stroke: '#111' }]}
+        yLabel="Temperature [°C]"
       />
     </div>
   )

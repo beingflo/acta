@@ -1,9 +1,11 @@
-import { createSignal, For } from 'solid-js'
+import { For } from 'solid-js'
 
 import { PRESETS, preset, range, setCustomRange, setPreset } from '../lib/range'
 
 export default function RangePicker() {
-  const [showCustom, setShowCustom] = createSignal(false)
+  // The custom inputs are shown whenever the custom preset is active, whether it
+  // was selected with the `C` button or by brushing a chart.
+  const isCustom = () => preset() === 'custom'
 
   const applyCustom = (from: string, to: string) => {
     const start = new Date(from)
@@ -20,20 +22,23 @@ export default function RangePicker() {
           {(item) => (
             <button
               classList={{ active: preset() === item.id }}
-              onClick={() => {
-                setShowCustom(false)
-                setPreset(item.id)
-              }}
+              onClick={() => setPreset(item.id)}
             >
               {item.label}
             </button>
           )}
         </For>
-        <button classList={{ active: preset() === 'custom' }} onClick={() => setShowCustom((v) => !v)}>
+        <button
+          classList={{ active: isCustom() }}
+          onClick={() => {
+            if (isCustom()) setPreset('1d')
+            else setCustomRange(range())
+          }}
+        >
           C
         </button>
       </div>
-      {showCustom() && (
+      {isCustom() && (
         <div class="custom-range">
           <input
             type="datetime-local"

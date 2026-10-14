@@ -15,17 +15,17 @@ export const PRESETS: { id: Exclude<Preset, 'custom'>; label: string }[] = [
 ]
 
 const [preset, setPresetSignal] = createSignal<Preset>('1d')
-const [custom, setCustom] = createSignal<Range | null>(null)
+const [customRange, setCustomRangeSignal] = createSignal<Range | null>(null)
 const [latest, setLatest] = createSignal<Date | null>(null)
 
-export { preset }
+export { preset, customRange }
 
 export function setPreset(next: Preset) {
   setPresetSignal(next)
 }
 
-export function setCustomRange(range: Range) {
-  setCustom(range)
+export function setCustomRange(next: Range) {
+  setCustomRangeSignal(next)
   setPresetSignal('custom')
 }
 
@@ -46,7 +46,7 @@ export function range(now = new Date()): Range {
   const end = stale ? newest : now
   const current = preset()
   if (current === 'custom') {
-    return custom() ?? { from: shift(end, '1d'), to: end }
+    return customRange() ?? { from: shift(end, '1d'), to: end }
   }
   return { from: shift(end, current), to: end }
 }
