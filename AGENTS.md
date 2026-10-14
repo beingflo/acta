@@ -20,3 +20,12 @@ Allowed — reading is always fine:
 - `jj log`, `jj diff`, `jj status`, `jj show`, `jj file list`
 
 If a change seems to warrant a commit, make the file edits and tell the user; do not commit.
+
+## Design docs
+
+`design/*.md` and `PLAN.md` describe the system at a high level. **Keep them in sync with the application.** When a
+change alters something a doc describes — schema, storage layout, API, query rules, dashboards, URL scheme, phases —
+update the relevant doc in the same piece of work.
+
+Keep doc edits crisp and high-level. State what the system does and why, not implementation detail the code already
+holds. Prefer correcting or trimming existing text over adding new sections.
