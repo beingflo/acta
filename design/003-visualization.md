@@ -7,18 +7,34 @@ The service is sitting passively waiting for requests to prepare data for the fr
 
 The service refers to the Rust application running on the server. It contains both the endpoints to ingest data into
 the system as well as the endpoints to fetch data.
-The visualization frontend is a SolidJS application using TODO charting library.
+The visualization frontend is a SolidJS application rendering time-series charts with uPlot (brush and zoom
+interaction is a requirement).
+
+The frontend owns the queries: every tile knows the SQL it runs. The service only executes SQL and returns the result,
+it has no notion of dashboards, tiles or metrics.
 
 ## API
 
-The API consists of a single endpoint that accepts an SQL query in DuckDB dialect and returns arbitrary JSON as returned
-by that query:
+The API consists of a single endpoint that accepts an SQL query in DuckDB dialect and returns the JSON document the
+query produces:
 
 ```
 GET /api/data
 ```
 
-In this way, the frontend drives which queries are issued against the parquet file.
+The query serializes its own result, e.g. `SELECT to_json(...)`. Producing JSON inside DuckDB keeps VARIANT values on
+the database side — DuckDB 1.5 cannot export VARIANT to Arrow — and lets each tile shape the response exactly as its
+chart needs it.
+
+## Queries
+
+Queries are written by the frontend and are self-contained: they embed concrete `from`/`to` timestamps instead of
+relying on `now()`, so a given query string always returns the same rows.
+
+The frontend knows the pixel width of each time-axis tile and the selected range, so it also picks the resolution: it
+chooses a bucket width (for example `time_bucket(INTERVAL '5 minutes', timestamp)`) targeting roughly one point per
+pixel and bakes it into the query. Narrow ranges return raw points, wide ranges are aggregated aggressively, keeping
+responses small.
 
 ## Authentication
 
@@ -46,10 +62,11 @@ A fixed date range picker is always visible on the top right as a list of button
 As an example, the 30d button sets the selected time range to `[now - 30d, now]`. The C button opens from / to datetime inputs underneath for custom ranges.
 
 All chart tiles that have a time axis update to reflect the selected timerange. By default the 1d option is selected.
+The frontend resolves the selection to concrete timestamps and embeds them into every tile query.
 
 ## Refresh
 
-All visible charts are auto-refreshed every 30s in a staggered manner.
+All visible charts are auto-refreshed every 30s, with random jitter to spread the requests.
 
 ## Architecture
 

@@ -1,1 +1,9 @@
+# Build outputs
+target/
+dist/
+node_modules/
+
+# Data
 *.parquet
+
+.DS_Store
