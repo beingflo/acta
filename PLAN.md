@@ -20,6 +20,7 @@ This document outlines the phases of development of Acta.
 [ ] Build endpoint that accepts arbitrary data
 [ ] Build endpoint that accepts GPS data
 [ ] Build Heuried scraper
+[ ] Build authentication
 [ ] Deploy Acta to server
 [ ] Switch over existing integrations
 

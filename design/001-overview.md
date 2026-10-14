@@ -37,8 +37,8 @@ The install artifact is a container that runs on the server using Podman and Qua
 
 ## Further reading
 
-Service: `design/service.md`
-Migration: `design/migration.md`
-Visualization: `design/visualization.md`
+Migration: `design/002-migration.md`
+Visualization: `design/003-visualization.md`
+Service: `design/004-service.md`
 
 Development plan: `PLAN.md`
