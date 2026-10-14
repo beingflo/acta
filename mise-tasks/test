@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Run the hurl API scenarios against a running service"
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+host="${ACTA_URL:-http://127.0.0.1:8080}"
+
+exec hurl --test --variable "host=${host}" "$root"/api/*.hurl

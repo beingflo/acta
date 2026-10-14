@@ -19,7 +19,8 @@ The API consists of a single endpoint that accepts an SQL query in DuckDB dialec
 query produces:
 
 ```
-GET /api/data
+POST /api/data
+{ "sql": "SELECT ..." }
 ```
 
 The query serializes its own result, e.g. `SELECT to_json(...)`. Producing JSON inside DuckDB keeps VARIANT values on
@@ -35,6 +36,9 @@ The frontend knows the pixel width of each time-axis tile and the selected range
 chooses a bucket width (for example `time_bucket(INTERVAL '5 minutes', timestamp)`) targeting roughly one point per
 pixel and bakes it into the query. Narrow ranges return raw points, wide ranges are aggregated aggressively, keeping
 responses small.
+
+Buckets are UTC-aligned and the browser renders timestamps in the viewer's local timezone. The service's DuckDB build
+has no ICU extension, so timestamps are cast to a naive UTC timestamp before any time function is used.
 
 ## Authentication
 
@@ -63,6 +67,9 @@ As an example, the 30d button sets the selected time range to `[now - 30d, now]`
 
 All chart tiles that have a time axis update to reflect the selected timerange. By default the 1d option is selected.
 The frontend resolves the selection to concrete timestamps and embeds them into every tile query.
+
+Relative ranges end at the wall clock, unless the data has not received a point recently, in which case they end at the
+newest available point. A stalled dataset then shows its latest window instead of an empty chart.
 
 ## Refresh
 
