@@ -2,22 +2,35 @@
 #MISE description="Run the service and frontend dev servers together"
 set -euo pipefail
 
-# Job control gives each background task its own process group, so one group
-# kill takes a server and its children (cargo, vite) down together.
+# Job control puts each server in its own process group. That matters twice
+# over: signalling the group reaches the server itself (mise does not forward
+# signals to its task), and the group is what lets us signal one side without
+# hitting the other. SIGINT rather than SIGTERM, because the servers must shut
+# down the way Ctrl-C makes them — killed outright, Vite leaves the terminal
+# with a half-drawn spinner and stray escape sequences on the prompt.
 set -m
 mise run service:dev &
 service=$!
 mise run ui:dev &
 ui=$!
 
-cleanup() {
+stop() {
   for pid in "$service" "$ui"; do
-    kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+    kill -INT -- -"$pid" 2>/dev/null || true
   done
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    kill -0 "$service" 2>/dev/null || kill -0 "$ui" 2>/dev/null || return 0
+    sleep 0.2
+  done
+  for pid in "$service" "$ui"; do
+    kill -TERM -- -"$pid" 2>/dev/null || true
+  done
+  wait "$service" "$ui" 2>/dev/null || true
 }
-trap cleanup EXIT INT TERM
+trap stop EXIT
+trap 'exit 130' INT TERM
 
-# bash 3.2 has no `wait -n`: poll until one side goes away, then stop the rest.
+# bash 3.2 has no `wait -n`: poll until one side goes away, then stop the other.
 while kill -0 "$service" 2>/dev/null && kill -0 "$ui" 2>/dev/null; do
   sleep 1
 done
