@@ -12,7 +12,7 @@ Everything is configured by the constants below; there is nothing to pass in.
 
     mise run map:regions                 write the regions, print the commands
     mise run map:download                the above, then build the archives
-    mise run map:download -- --dry-run   size the extracts, download nothing
+    mise run map:download --dry-run      size the extracts, download nothing
 
 The two tiers keep the zoom bands disjoint, so each band is served by the most
 specific region:

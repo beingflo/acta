@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-#MISE description="Build the PMTiles archives from the derived regions (--dry-run to just size them)"
+#MISE description="Build the PMTiles archives from the derived regions"
+#USAGE flag "--dry-run" help="Size the extracts without downloading"
 set -euo pipefail
 
 exec python3 tools/map_regions.py download "$@"

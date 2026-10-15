@@ -104,7 +104,7 @@ range comes from its own header, so it is not restated in the frontend.
 
 Those regions are derived from the fixes themselves with `tools/map_regions.py`, which is driven entirely by
 constants inside it: `mise run map:regions` writes the regions and prints the commands, `mise run map:download` builds
-the archives (`-- --dry-run` to only size them). It scores a ~500 m grid by how many distinct days each cell is
+the archives (`--dry-run` to only size them). It scores a ~500 m grid by how many distinct days each cell is
 visited, pads and run-length encodes the qualifying cells into a GeoJSON MultiPolygon that follows the track rather
 than a bounding box, and prints the matching `pmtiles extract --region=<file>` command per tier. High zoom is thus
 spent where the data actually is.
