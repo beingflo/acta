@@ -8,3 +8,7 @@ __pycache__/
 *.parquet
 
 .DS_Store
+
+# Map tiles
+*.pmtiles
+tiles/regions/

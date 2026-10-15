@@ -7,7 +7,7 @@
 
 import { type Preset, type Range, setCustomRange, setPreset } from './range'
 
-const SHORTHANDS: Preset[] = ['1y', '6m', '30d', '7d', '1d', '6h']
+const SHORTHANDS: Preset[] = ['all', '2y', '1y', '6m', '30d', '7d', '1d', '6h']
 
 export function dashboardPath(id: string): string {
   return `/${id}`

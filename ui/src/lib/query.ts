@@ -103,6 +103,24 @@ export function toAligned(
   return [timestamps, ...columns] as uPlot.AlignedData
 }
 
+/** Location fixes as `{ lon, lat }` pairs, in time order, for the map tile. */
+export function locationPointsSql(from: Date, to: Date): string {
+  return `SELECT coalesce(
+           to_json(array_agg(struct_pack(lon := lon, lat := lat) ORDER BY ts)),
+           '[]'::JSON
+         )::VARCHAR
+FROM (
+  SELECT timestamp AS ts,
+         data.geometry.coordinates[1]::DOUBLE AS lon,
+         data.geometry.coordinates[2]::DOUBLE AS lat
+  FROM events
+  WHERE source = 'location_florian'
+    AND data.geometry.type = 'Point'
+    AND timestamp >= TIMESTAMPTZ '${from.toISOString()}'
+    AND timestamp <  TIMESTAMPTZ '${to.toISOString()}'
+)`
+}
+
 function escape(value: string): string {
   return value.replace(/'/g, "''")
 }

@@ -176,6 +176,23 @@ body.fullscreen-tile {
   width: 100%;
 }
 
+/* Full-height map dashboard. The map fills the tile edge to edge; the tile's
+   border provides the frame. */
+.dashboard.map {
+  grid-template-columns: 1fr;
+  height: calc(100vh - var(--header-height) - 48px);
+}
+
+.tile.map {
+  padding: 0;
+  overflow: hidden;
+}
+
+.tile.map .map {
+  position: absolute;
+  inset: 0;
+}
+
 .palette-backdrop {
   position: fixed;
   inset: 0;

@@ -9,6 +9,7 @@ use crate::db::DbOptions;
 pub struct Settings {
     pub addr: SocketAddr,
     pub ui_dir: PathBuf,
+    pub tiles_dir: PathBuf,
     pub db: DbOptions,
 }
 
@@ -19,6 +20,7 @@ impl Settings {
             .map_err(|e| format!("ACTA_ADDR: {e}"))?;
 
         let ui_dir = PathBuf::from(env_str("ACTA_UI_DIR", "ui/dist"));
+        let tiles_dir = PathBuf::from(env_str("ACTA_TILES_DIR", "tiles"));
 
         let db = DbOptions {
             data_dir: PathBuf::from(env_str("ACTA_DATA_DIR", "data")),
@@ -29,7 +31,7 @@ impl Settings {
             max_response_bytes: env_parse("ACTA_MAX_RESPONSE_BYTES", 8 * 1024 * 1024)?,
         };
 
-        Ok(Self { addr, ui_dir, db })
+        Ok(Self { addr, ui_dir, tiles_dir, db })
     }
 }
 

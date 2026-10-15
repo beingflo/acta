@@ -65,7 +65,8 @@ Dashboards make up the primary interface of the visualization frontend. The acti
 picker. Each dashboard is a grid of tiles; a tile has a centered title above its chart.
 Dashboards are hardcoded in the application, no dynamic configuration needed and no user modifiability.
 
-Dashboards can be switched by hitting cmd+k: This pops up a command-palette like selector where all available dashboards are listed.
+Dashboards can be switched by hitting cmd+k: This pops up a command-palette like selector where all available dashboards are listed. Within
+it, the arrow keys (or ctrl+j / ctrl+k) move the selection and enter opens it.
 
 The following dashboards are implemented:
 
@@ -88,12 +89,28 @@ The tiles are fed by three sensors: `co2-sensor-living-room` (co2, temperature, 
 
 A single full-width tile containing a visitor chart fed by the `heuried-visitors` data source. The chart has time on the X axis and visitors on the Y axis.
 
+### Location
+
+A single full-width and full-height tile showing a map fed by the `location_florian` data source: the position fixes
+in the selected range are plotted. They are drawn as a line joining them in time order by default; hovering the map and
+pressing `p` switches to points and back.
+
+The basemap is self-hosted. The service serves PMTiles archives from `tiles/` and the frontend renders them with
+MapLibre GL and the PMTiles protocol as two sources: a world basemap underneath and a high-detail Zurich extract on
+top. Each archive's zoom range comes from its own header, so it is not restated in the frontend.
+
+High-detail regions are derived from the fixes themselves with `tools/map_regions.py` (also `mise run map-regions`):
+it scores a grid by how many distinct days each cell is visited, clusters the qualifying cells, and writes buffered
+GeoJSON regions per tier — street level where visits are frequent, town where they are rare. `pmtiles extract
+--region=<file>` then pulls only those tiles, so high zoom is spent where the data actually is.
+
 ### TODO add more later
 
 ## Date range picker
 
-A fixed date range picker is always visible on the top right as a list of buttons: `1y 6m 30d 7d 1d 6h C`
-As an example, the 30d button sets the selected time range to `[now - 30d, now]`. The C button opens from / to datetime inputs underneath for custom ranges.
+A fixed date range picker is always visible on the top right as a list of buttons: `all 2y 1y 6m 30d 7d 1d 6h C`
+As an example, the 30d button sets the selected time range to `[now - 30d, now]`, while `all` spans the full data range
+(earliest to newest point). The C button opens from / to datetime inputs underneath for custom ranges.
 
 All chart tiles that have a time axis update to reflect the selected timerange. By default the 1d option is selected.
 The frontend resolves the selection to concrete timestamps and embeds them into every tile query.

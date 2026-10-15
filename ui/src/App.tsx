@@ -6,7 +6,7 @@ import RangePicker from './components/RangePicker'
 import { DASHBOARDS } from './dashboards'
 import { fetchData } from './lib/api'
 import { fullscreenTile, installFullscreenShortcuts } from './lib/fullscreen'
-import { customRange, preset, setLatestData } from './lib/range'
+import { customRange, preset, setDataBounds } from './lib/range'
 import { applyRangeFromUrl, dashboardPath, rangeQuery, readDashboard, writeUrl } from './lib/url'
 import './App.css'
 
@@ -26,15 +26,15 @@ export default function App() {
     const uninstallFullscreen = installFullscreenShortcuts()
     onCleanup(uninstallFullscreen)
 
-    void fetchData<number>(
-      'SELECT to_json(epoch(CAST(max(timestamp) AS TIMESTAMP)))::VARCHAR FROM events',
+    void fetchData<{ mn: number; mx: number }>(
+      'SELECT to_json(struct_pack(mn := epoch(CAST(min(timestamp) AS TIMESTAMP)), mx := epoch(CAST(max(timestamp) AS TIMESTAMP))))::VARCHAR FROM events',
     )
-      .then((epoch) => {
-        if (typeof epoch === 'number' && Number.isFinite(epoch)) {
-          setLatestData(new Date(epoch * 1000))
+      .then((bounds) => {
+        if (bounds && Number.isFinite(bounds.mn) && Number.isFinite(bounds.mx)) {
+          setDataBounds(new Date(bounds.mn * 1000), new Date(bounds.mx * 1000))
         }
       })
-      .catch((error) => console.warn('could not determine the latest data timestamp', error))
+      .catch((error) => console.warn('could not determine the data time bounds', error))
   })
 
   // Dashboard -> path, keeping the current range.

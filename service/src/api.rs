@@ -2,14 +2,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
+use tower::ServiceBuilder;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::services::{ServeDir, ServeFile};
+use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::db::{Db, QueryError};
 
@@ -18,13 +20,32 @@ pub struct AppState {
     pub db: Arc<Db>,
 }
 
-pub fn router(state: AppState, ui_dir: PathBuf) -> Router {
+pub fn router(state: AppState, ui_dir: PathBuf, tiles_dir: PathBuf) -> Router {
     let index = ui_dir.join("index.html");
     let spa = ServeDir::new(ui_dir).fallback(ServeFile::new(index));
+
+    // PMTiles archives are pulled with HTTP Range requests. `ServeDir` supports
+    // ranges and sets a strong ETag from the file metadata; the PMTiles client
+    // reads that ETag to notice a replaced archive.
+    let tiles = ServiceBuilder::new()
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=300, must-revalidate"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::ACCESS_CONTROL_ALLOW_ORIGIN,
+            HeaderValue::from_static("*"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("access-control-expose-headers"),
+            HeaderValue::from_static("ETag, Content-Length, Content-Range"),
+        ))
+        .service(ServeDir::new(tiles_dir));
 
     Router::new()
         .route("/healthz", get(healthz))
         .route("/api/data", post(data))
+        .nest_service("/tiles", tiles)
         .fallback_service(spa)
         .layer(CatchPanicLayer::new())
         .with_state(state)

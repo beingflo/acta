@@ -13,7 +13,9 @@ export default function DashboardPicker(props: { active: string; onSelect: (id: 
 
   const openPalette = () => {
     setQuery('')
-    setHighlight(0)
+    // Start on the current dashboard rather than the top of the list.
+    const index = DASHBOARDS.findIndex((dashboard) => dashboard.id === props.active)
+    setHighlight(index >= 0 ? index : 0)
     setOpen(true)
   }
 
@@ -29,30 +31,37 @@ export default function DashboardPicker(props: { active: string; onSelect: (id: 
     if (open()) searchRef?.focus()
   })
 
-  // Reset the highlight to the top of the list whenever the filter changes.
-  createEffect(() => {
-    query()
-    setHighlight(0)
-  })
-
   onMount(() => {
+    const move = (delta: number) =>
+      setHighlight((index) =>
+        Math.min(Math.max(index + delta, 0), Math.max(filtered().length - 1, 0)),
+      )
+
     const onKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault()
-        if (open()) setOpen(false)
-        else openPalette()
+      const key = event.key.toLowerCase()
+      const ctrl = event.ctrlKey
+      const meta = event.metaKey
+
+      if (!open()) {
+        if ((meta || ctrl) && key === 'k') {
+          event.preventDefault()
+          openPalette()
+        }
         return
       }
-      if (!open()) return
 
       if (event.key === 'Escape') {
         setOpen(false)
-      } else if (event.key === 'ArrowDown') {
+      } else if (event.key === 'ArrowDown' || (ctrl && key === 'j')) {
         event.preventDefault()
-        setHighlight((index) => Math.min(index + 1, filtered().length - 1))
-      } else if (event.key === 'ArrowUp') {
+        move(1)
+      } else if (event.key === 'ArrowUp' || (ctrl && key === 'k')) {
         event.preventDefault()
-        setHighlight((index) => Math.max(index - 1, 0))
+        move(-1)
+      } else if (meta && key === 'k') {
+        // On macOS keep cmd+k as close; ctrl+k is navigation above.
+        event.preventDefault()
+        setOpen(false)
       } else if (event.key === 'Enter') {
         const item = filtered()[highlight()]
         if (item) select(item.id)
@@ -74,7 +83,11 @@ export default function DashboardPicker(props: { active: string; onSelect: (id: 
               ref={searchRef}
               placeholder="Go to dashboard…"
               value={query()}
-              onInput={(event) => setQuery(event.currentTarget.value)}
+              onInput={(event) => {
+                setQuery(event.currentTarget.value)
+                // Typing narrows the list; put the highlight on the first match.
+                setHighlight(0)
+              }}
             />
             <For each={filtered()}>
               {(dashboard, index) => (

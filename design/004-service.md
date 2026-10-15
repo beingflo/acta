@@ -12,6 +12,10 @@ for the query model.
 The built frontend (`ui/dist`) is served by the same process; unknown paths fall back to `index.html` for the
 single-page app.
 
+The service also serves PMTiles map archives from `tiles/` (`ACTA_TILES_DIR`) at `/tiles/*`, with HTTP range support, a
+strong ETag and a short cache window — currently a world archive and a Zurich archive. See
+`design/003-visualization.md` for how the map uses them.
+
 ## Auth
 
 ## Data ingestion

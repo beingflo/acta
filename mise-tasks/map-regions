@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Derive PMTiles extract regions from the location data (needs the service running)"
+set -euo pipefail
+
+exec python3 tools/map_regions.py "$@"
