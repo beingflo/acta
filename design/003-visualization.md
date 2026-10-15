@@ -111,6 +111,14 @@ spent where the data actually is.
 
 ### TODO add more later
 
+## Charts
+
+Time series are drawn with uPlot. A crosshair follows the pointer and a small tooltip next to it shows the bucket's
+timestamp and each series' value with its unit. That cursor is shared by every tile, so hovering one shows the same
+instant on all of them. Only x is shared — each tile has its own y scale — so the tiles that merely follow show the
+vertical line with their tooltip pinned to the top of the plot, and a horizontal line only on the tile being hovered.
+Dragging horizontally selects a custom range; a short drag is ignored, so it still reads as a click.
+
 ## Date range picker
 
 A fixed date range picker is always visible on the top right as a list of buttons: `all 2y 1y 6m 30d 7d 1d 6h C`

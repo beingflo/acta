@@ -15,6 +15,30 @@ const DEFAULT_HEIGHT = 300
 // Header height (`--header-height`) plus the tile's own title, label and padding.
 const FULLSCREEN_CHROME = 130
 
+/** All tiles join one uPlot sync group, so the cursor is shared between them. */
+const CURSOR_SYNC = 'acta-cursor'
+
+/** Trim to a readable precision: 1013.2, 21.23, 452. */
+function formatNumber(value: number): string {
+  const digits = Math.abs(value) >= 1000 ? 0 : Math.abs(value) >= 100 ? 1 : 2
+  const fixed = value.toFixed(digits)
+  return fixed.includes('.') ? fixed.replace(/0+$/, '').replace(/\.$/, '') : fixed
+}
+
+/** Local time, matching what uPlot's time axis shows. */
+function formatTimestamp(seconds: number, dateOnly: boolean): string {
+  const date = new Date(seconds * 1000)
+  const pad = (part: number) => String(part).padStart(2, '0')
+  const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+  return dateOnly ? day : `${day} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+/** The `[ppm]` part of a y-label, if it has one. */
+function unitOf(yLabel?: string): string {
+  const match = yLabel?.match(/\[([^\]]+)\]/)
+  return match ? ` ${match[1]}` : ''
+}
+
 export default function TimeSeriesTile(props: {
   title: string
   source: string
@@ -35,6 +59,78 @@ export default function TimeSeriesTile(props: {
   let chart: uPlot | undefined
   let requestId = 0
   const [width, setWidth] = createSignal(0)
+
+  // The tooltip lives inside uPlot's `.u-over` element, which is the coordinate
+  // space `cursor.left`/`cursor.top` are reported in.
+  let tooltip: HTMLDivElement | undefined
+  let tooltipTime: HTMLDivElement | undefined
+  let tooltipValues: HTMLSpanElement[] = []
+
+  const buildTooltip = (over: HTMLElement) => {
+    const box = document.createElement('div')
+    box.className = 'chart-tooltip'
+    box.style.display = 'none'
+
+    const time = document.createElement('div')
+    time.className = 'chart-tooltip-time'
+    box.append(time)
+
+    tooltipValues = props.series.map((series) => {
+      const row = document.createElement('div')
+      row.className = 'chart-tooltip-row'
+      if (props.series.length > 1) {
+        const swatch = document.createElement('span')
+        swatch.className = 'chart-tooltip-swatch'
+        swatch.style.background = strokeFor(series.metric)
+        row.append(swatch)
+      }
+      const label = document.createElement('span')
+      label.className = 'chart-tooltip-label'
+      label.textContent = series.label
+      const value = document.createElement('span')
+      value.className = 'chart-tooltip-value'
+      row.append(label, value)
+      box.append(row)
+      return value
+    })
+
+    over.append(box)
+    tooltip = box
+    tooltipTime = time
+  }
+
+  const updateTooltip = (self: uPlot) => {
+    if (!tooltip || !tooltipTime) return
+    const { idx, left, top } = self.cursor
+    const x = idx == null ? undefined : (self.data[0]?.[idx] as number | null | undefined)
+    if (idx == null || left == null || top == null || left < 0 || x == null || !Number.isFinite(x)) {
+      tooltip.style.display = 'none'
+      return
+    }
+
+    const { from, to } = range()
+    tooltipTime.textContent = formatTimestamp(x, to.getTime() - from.getTime() > 30 * 86_400_000)
+    const unit = unitOf(props.yLabel)
+    props.series.forEach((_, index) => {
+      const value = self.data[index + 1]?.[idx]
+      tooltipValues[index].textContent =
+        typeof value === 'number' ? `${formatNumber(value)}${unit}` : '\u2014'
+    })
+
+    // Keep the box inside the plot: offset from the crosshair, flipping when
+    // there is not enough room to the right or below. A synced cursor carries no
+    // y of its own (see the sync config above), so that tooltip pins to the top
+    // of the plot rather than sitting at an arbitrary height.
+    tooltip.style.display = ''
+    const anchorY = top < 0 ? 0 : top
+    const gap = 12
+    const boxWidth = tooltip.offsetWidth
+    const boxHeight = tooltip.offsetHeight
+    const offsetX = left + gap + boxWidth > self.over.clientWidth ? left - gap - boxWidth : left + gap
+    const offsetY =
+      anchorY + gap + boxHeight > self.over.clientHeight ? anchorY - gap - boxHeight : anchorY + gap
+    tooltip.style.transform = `translate(${offsetX}px, ${offsetY}px)`
+  }
 
   const options = (chartWidth: number): uPlot.Options => ({
     width: chartWidth,
@@ -65,8 +161,22 @@ export default function TimeSeriesTile(props: {
     ],
     scales: { x: { time: true } },
     legend: { show: props.series.length > 1 },
-    cursor: { drag: { x: true, y: false, setScale: false } },
+    cursor: {
+      drag: { x: true, y: false, setScale: false },
+      // uPlot shares the cursor between every tile with this key. Only x means
+      // anything across tiles — each has its own y scale — so the y match always
+      // fails: subscribers get top = -10, which uPlot turns into the `u-off`
+      // class and hides the horizontal line, leaving the tile under the pointer
+      // with its full crosshair.
+      sync: {
+        key: CURSOR_SYNC,
+        scales: ['x', 'y'],
+        match: [() => true, () => false],
+        setSeries: true,
+      },
+    },
     hooks: {
+      setCursor: [(self) => updateTooltip(self)],
       setSelect: [
         (self) => {
           const { left, width: selection } = self.select
@@ -128,6 +238,9 @@ export default function TimeSeriesTile(props: {
       clearTimeout(timer)
       chart?.destroy()
       chart = undefined
+      tooltip = undefined
+      tooltipTime = undefined
+      tooltipValues = []
       if (isFullscreen()) exitFullscreen()
     })
   })
@@ -138,6 +251,7 @@ export default function TimeSeriesTile(props: {
     range() // re-run when the selected range changes
     if (!chart) {
       chart = new uPlot(options(chartWidth), [[], ...props.series.map(() => [])], container)
+      buildTooltip(chart.over)
     }
     void load()
   })

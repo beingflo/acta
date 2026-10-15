@@ -176,6 +176,53 @@ body.fullscreen-tile {
   width: 100%;
 }
 
+/* Cursor tooltip. It is a child of uPlot's `.u-over`, positioned with a
+   transform from the crosshair; z-index must beat uPlot's own cursor lines
+   and selection overlay, which sit at 100. */
+.chart-tooltip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 101;
+  min-width: 88px;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #333;
+  background: #fff;
+  border: 1px solid #c9c9c9;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.chart-tooltip-time {
+  color: #6e6e6e;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-tooltip-swatch {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+}
+
+.chart-tooltip-label {
+  flex: 1;
+}
+
+.chart-tooltip-value {
+  color: #111;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Full-height map dashboard. The map fills the tile edge to edge; the tile's
    border provides the frame. */
 .dashboard.map {
