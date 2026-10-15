@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Build the PMTiles archives from the derived regions (--dry-run to just size them)"
+set -euo pipefail
+
+exec python3 tools/map_regions.py download "$@"

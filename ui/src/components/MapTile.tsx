@@ -9,17 +9,20 @@ import { fetchData } from '../lib/api'
 import { locationPointsSql } from '../lib/query'
 import { range } from '../lib/range'
 
-// PMTiles archives served by the service (see `service/src/api.rs`): a world
-// basemap and a high-detail Zurich extract. They are referenced as two sources,
-// the world set underneath and Zurich on top. Each archive's zoom range comes
-// from its own header (the PMTiles protocol exposes it as TileJSON), so nothing
-// is hardcoded here: the world source overzooms past its max zoom outside
-// Zurich rather than going black, and the Zurich source adds detail in bounds.
-const WORLD_URL = '/tiles/world.pmtiles'
-const ZURICH_URL = '/tiles/zurich-hi.pmtiles'
+// PMTiles archives served by the service (see `service/src/api.rs`), coarsest
+// first. Each archive's zoom range comes from its own header (the PMTiles
+// protocol exposes it as TileJSON), so nothing is hardcoded here: the world set
+// overzooms past z6 where no finer tile exists, `all` covers z9-12 everywhere
+// the fixes are, and `tier1` adds street detail (z13-15) where they are
+// frequent. Both extracts are derived from the fixes by `tools/map_regions.py`.
+const BASEMAPS = [
+  { id: 'world', url: '/tiles/world.pmtiles' },
+  { id: 'all', url: '/tiles/all.pmtiles' },
+  { id: 'tier1', url: '/tiles/tier1.pmtiles' },
+]
 
 const THEME = 'light'
-const ZURICH_CENTER: [number, number] = [8.543415, 47.367249]
+const CENTER: [number, number] = [8.543415, 47.367249]
 
 // Protomaps glyphs and sprites, matching the basemap style.
 const GLYPHS = 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf'
@@ -35,7 +38,7 @@ let protocolRegistered = false
 function buildStyle(): StyleSpecification {
   const base = layers('protomaps', namedFlavor(THEME), { lang: 'local' })
   // The background layer has no source; every other layer is duplicated per
-  // source, the world set underneath and the Zurich set on top.
+  // archive, painted in order so the finest set sits on top.
   const background = base.filter((layer) => layer.type === 'background')
   const data = base.filter((layer) => layer.type !== 'background')
   const perSource = (source: string) =>
@@ -45,22 +48,19 @@ function buildStyle(): StyleSpecification {
     version: 8,
     glyphs: GLYPHS,
     sprite: SPRITE,
-    sources: {
-      world: {
-        type: 'vector',
-        url: `pmtiles://${window.location.origin}${WORLD_URL}`,
-        attribution: ATTRIBUTION,
-      },
-      zurich: {
-        type: 'vector',
-        url: `pmtiles://${window.location.origin}${ZURICH_URL}`,
-        attribution: ATTRIBUTION,
-      },
-    },
+    sources: Object.fromEntries(
+      BASEMAPS.map(({ id, url }) => [
+        id,
+        {
+          type: 'vector',
+          url: `pmtiles://${window.location.origin}${url}`,
+          attribution: ATTRIBUTION,
+        },
+      ]),
+    ) as StyleSpecification['sources'],
     layers: [
       ...background,
-      ...perSource('world'),
-      ...perSource('zurich'),
+      ...BASEMAPS.flatMap(({ id }) => perSource(id)),
     ] as StyleSpecification['layers'],
   }
 }
@@ -130,7 +130,7 @@ export default function MapTile() {
     map = new MapLibreMap({
       container,
       style: buildStyle(),
-      center: ZURICH_CENTER,
+      center: CENTER,
       zoom: 12,
       attributionControl: { compact: true },
     })

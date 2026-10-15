@@ -7,7 +7,7 @@ export default function Heuried() {
         wide
         title="Heuried visitors"
         source="heuried-visitors"
-        series={[{ label: 'Visitors', expr: 'avg(data::BIGINT)', stroke: '#111' }]}
+        series={[{ label: 'Visitors', expr: 'avg(data::BIGINT)', metric: 'visitors' }]}
         yLabel="Visitors"
       />
     </div>

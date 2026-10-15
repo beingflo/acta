@@ -4,6 +4,7 @@ import 'uplot/dist/uPlot.min.css'
 
 import { fetchData } from '../lib/api'
 import { exitFullscreen, fullscreenTile, setHoveredTile } from '../lib/fullscreen'
+import { fillFor, strokeFor } from '../lib/palette'
 import { bucketFor, timeSeriesSql, toAligned, type Series } from '../lib/query'
 import { range, setCustomRange } from '../lib/range'
 
@@ -39,7 +40,15 @@ export default function TimeSeriesTile(props: {
     width: chartWidth,
     height: height(),
     pxAlign: 0,
-    series: [{}, ...props.series.map((s) => ({ label: s.label, stroke: s.stroke, width: 1 }))],
+    series: [
+      {},
+      ...props.series.map((s) => ({
+        label: s.label,
+        stroke: strokeFor(s.metric),
+        width: 1,
+        fill: fillFor(s.metric),
+      })),
+    ],
     axes: [
       {
         stroke: '#222',

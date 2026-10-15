@@ -17,7 +17,9 @@ The read path reads `data/*.parquet`. The file is sorted by source and then time
 every other source's row groups and each row group's Variant payload stays homogeneous enough to shred.
 
 The UI is light-mode only and deliberately minimal: white cards with hairline borders, text-only controls, centered
-tile titles, and one thin black line per series. Hovering a tile and pressing `v` expands it to fill the viewport;
+tile titles, and one thin line per series with a faint wash of the same hue under the curve. Each metric has its own
+hue (temperature warm, humidity blue, …) and keeps it across dashboards, so the same quantity always reads the same.
+Hovering a tile and pressing `v` expands it to fill the viewport;
 `v`, `Escape` or the tile's × restores it.
 
 ## API
@@ -96,13 +98,16 @@ in the selected range are plotted. They are drawn as a line joining them in time
 pressing `p` switches to points and back.
 
 The basemap is self-hosted. The service serves PMTiles archives from `tiles/` and the frontend renders them with
-MapLibre GL and the PMTiles protocol as two sources: a world basemap underneath and a high-detail Zurich extract on
-top. Each archive's zoom range comes from its own header, so it is not restated in the frontend.
+MapLibre GL and the PMTiles protocol as several stacked sources, coarsest first: a world basemap, a mid-zoom set
+covering everywhere the fixes are, and a street-level set over the places they are most frequent. Each archive's zoom
+range comes from its own header, so it is not restated in the frontend.
 
-High-detail regions are derived from the fixes themselves with `tools/map_regions.py` (also `mise run map-regions`):
-it scores a grid by how many distinct days each cell is visited, clusters the qualifying cells, and writes buffered
-GeoJSON regions per tier — street level where visits are frequent, town where they are rare. `pmtiles extract
---region=<file>` then pulls only those tiles, so high zoom is spent where the data actually is.
+Those regions are derived from the fixes themselves with `tools/map_regions.py`, which is driven entirely by
+constants inside it: `mise run map:regions` writes the regions and prints the commands, `mise run map:download` builds
+the archives (`-- --dry-run` to only size them). It scores a ~500 m grid by how many distinct days each cell is
+visited, pads and run-length encodes the qualifying cells into a GeoJSON MultiPolygon that follows the track rather
+than a bounding box, and prints the matching `pmtiles extract --region=<file>` command per tier. High zoom is thus
+spent where the data actually is.
 
 ### TODO add more later
 

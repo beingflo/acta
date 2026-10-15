@@ -13,7 +13,8 @@ The built frontend (`ui/dist`) is served by the same process; unknown paths fall
 single-page app.
 
 The service also serves PMTiles map archives from `tiles/` (`ACTA_TILES_DIR`) at `/tiles/*`, with HTTP range support, a
-strong ETag and a short cache window — currently a world archive and a Zurich archive. See
+strong ETag and a short cache window — currently a world archive plus two extracts derived from the location fixes.
+See
 `design/003-visualization.md` for how the map uses them.
 
 ## Auth
