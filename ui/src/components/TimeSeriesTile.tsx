@@ -4,9 +4,11 @@ import 'uplot/dist/uPlot.min.css'
 
 import { fetchData } from '../lib/api'
 import { exitFullscreen, fullscreenTile, setHoveredTile } from '../lib/fullscreen'
+import { formatNumber, formatTimestamp, unitOf } from '../lib/format'
+import { clearReadings, claimReadingOrder, publishReadings } from '../lib/latest'
 import { fillFor, strokeFor } from '../lib/palette'
 import { bucketFor, timeSeriesSql, toAligned, type Series } from '../lib/query'
-import { range, setCustomRange } from '../lib/range'
+import { dateOnlyRange, range, setCustomRange } from '../lib/range'
 
 const REFRESH_MS = 30_000
 const JITTER_MS = 5_000
@@ -18,26 +20,6 @@ const FULLSCREEN_CHROME = 130
 /** All tiles join one uPlot sync group, so the cursor is shared between them. */
 const CURSOR_SYNC = 'acta-cursor'
 
-/** Trim to a readable precision: 1013.2, 21.23, 452. */
-function formatNumber(value: number): string {
-  const digits = Math.abs(value) >= 1000 ? 0 : Math.abs(value) >= 100 ? 1 : 2
-  const fixed = value.toFixed(digits)
-  return fixed.includes('.') ? fixed.replace(/0+$/, '').replace(/\.$/, '') : fixed
-}
-
-/** Local time, matching what uPlot's time axis shows. */
-function formatTimestamp(seconds: number, dateOnly: boolean): string {
-  const date = new Date(seconds * 1000)
-  const pad = (part: number) => String(part).padStart(2, '0')
-  const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-  return dateOnly ? day : `${day} ${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-/** The `[ppm]` part of a y-label, if it has one. */
-function unitOf(yLabel?: string): string {
-  const match = yLabel?.match(/\[([^\]]+)\]/)
-  return match ? ` ${match[1]}` : ''
-}
 
 export default function TimeSeriesTile(props: {
   title: string
@@ -48,6 +30,13 @@ export default function TimeSeriesTile(props: {
   wide?: boolean
 }) {
   const id = props.title
+  // Claimed during setup rather than when the query returns, so the summary
+  // strip lists the charts in dashboard order, not reply order.
+  const order = claimReadingOrder()
+  // A tile is only worth syncing while it is on screen: a maximized tile covers
+  // the others, and having them follow the cursor would float their tooltips
+  // over it.
+  const inSync = () => isFullscreen() || fullscreenTile() === null
   // A memo (not a plain accessor) so toggling one tile does not re-run every
   // other tile's effects.
   const isFullscreen = createMemo(() => fullscreenTile() === id)
@@ -59,6 +48,30 @@ export default function TimeSeriesTile(props: {
   let chart: uPlot | undefined
   let requestId = 0
   const [width, setWidth] = createSignal(0)
+
+  /**
+   * Hand the newest value of each series to the summary strip. Read from the
+   * plotted data, so the card always agrees with the right-hand end of the
+   * chart and costs no extra query.
+   */
+  const publish = (aligned: uPlot.AlignedData) => {
+    const columns = aligned.slice(1) as (number | null | undefined)[][]
+    const unit = unitOf(props.yLabel)
+    publishReadings(
+      id,
+      order,
+      props.series.map((_, index) => {
+        const values = columns[index] ?? []
+        for (let at = values.length - 1; at >= 0; at--) {
+          const value = values[at]
+          if (typeof value === 'number' && Number.isFinite(value)) {
+            return { title: props.title, unit, value }
+          }
+        }
+        return { title: props.title, unit, value: null }
+      }),
+    )
+  }
 
   // The tooltip lives inside uPlot's `.u-over` element, which is the coordinate
   // space `cursor.left`/`cursor.top` are reported in.
@@ -108,13 +121,12 @@ export default function TimeSeriesTile(props: {
       return
     }
 
-    const { from, to } = range()
-    tooltipTime.textContent = formatTimestamp(x, to.getTime() - from.getTime() > 30 * 86_400_000)
+    tooltipTime.textContent = formatTimestamp(x, dateOnlyRange())
     const unit = unitOf(props.yLabel)
     props.series.forEach((_, index) => {
       const value = self.data[index + 1]?.[idx]
       tooltipValues[index].textContent =
-        typeof value === 'number' ? `${formatNumber(value)}${unit}` : '\u2014'
+        typeof value === 'number' ? `${formatNumber(value)}${unit ? ` ${unit}` : ''}` : '\u2014'
     })
 
     // Keep the box inside the plot: offset from the crosshair, flipping when
@@ -173,6 +185,9 @@ export default function TimeSeriesTile(props: {
         scales: ['x', 'y'],
         match: [() => true, () => false],
         setSeries: true,
+        // uPlot replaces the whole defaults object instead of merging into it,
+        // so both filters have to be supplied even though they agree.
+        filters: { pub: inSync, sub: inSync },
       },
     },
     hooks: {
@@ -207,7 +222,9 @@ export default function TimeSeriesTile(props: {
     try {
       const rows = await fetchData<Array<Record<string, number | string>>>(sql)
       if (request !== requestId || !chart) return
-      chart.setData(toAligned(rows ?? [], props.series.length))
+      const aligned = toAligned(rows ?? [], props.series.length)
+      chart.setData(aligned)
+      publish(aligned)
     } catch (error) {
       if (request === requestId) console.error(`tile "${props.title}" query failed`, error)
     }
@@ -238,6 +255,7 @@ export default function TimeSeriesTile(props: {
       clearTimeout(timer)
       chart?.destroy()
       chart = undefined
+      clearReadings(id)
       tooltip = undefined
       tooltipTime = undefined
       tooltipValues = []
@@ -276,10 +294,10 @@ export default function TimeSeriesTile(props: {
           ×
         </button>
       </Show>
-      <div class="tile-body">
-        {props.yLabel && <div class="tile-ylabel">↑ {props.yLabel}</div>}
-        <div class="tile-chart" ref={container} />
-      </div>
+        <div class="tile-body">
+          {props.yLabel && <div class="tile-ylabel">↑ {props.yLabel}</div>}
+          <div class="tile-chart" ref={container} />
+        </div>
     </section>
   )
 }

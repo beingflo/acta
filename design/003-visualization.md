@@ -111,12 +111,19 @@ spent where the data actually is.
 
 ### TODO add more later
 
+## Summary strip
+
+Above the charts, one small card per chart repeats its newest value in the selected range, with the unit and a swatch
+in the chart's colour. The tiles publish those values as they load, so the strip costs no extra queries and can never
+disagree with the right-hand end of the chart.
+
 ## Charts
 
 Time series are drawn with uPlot. A crosshair follows the pointer and a small tooltip next to it shows the bucket's
 timestamp and each series' value with its unit. That cursor is shared by every tile, so hovering one shows the same
 instant on all of them. Only x is shared — each tile has its own y scale — so the tiles that merely follow show the
 vertical line with their tooltip pinned to the top of the plot, and a horizontal line only on the tile being hovered.
+A maximized tile is the only chart on screen, so it is the only one that takes part in that sharing.
 Dragging horizontally selects a custom range; a short drag is ignored, so it still reads as a click.
 
 ## Date range picker

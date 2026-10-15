@@ -115,6 +115,10 @@ main {
 
 .tile {
   position: relative;
+  /* Own stacking context, so a tooltip can never paint outside its own tile.
+     Without it the tooltip uses the root context and floats above a maximized
+     tile, which sits at z-index 5. */
+  z-index: 0;
   padding: 18px 20px 8px;
   background: #fff;
   border: 1px solid #c9c9c9;
@@ -174,6 +178,46 @@ body.fullscreen-tile {
 
 .tile-chart {
   width: 100%;
+}
+
+/* Summary strip: the newest value of every chart on the dashboard, in a row
+   above them. Spans the whole grid width. */
+.latest-strip {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.latest-card {
+  flex: 1 1 130px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid #eeeeee;
+  border-radius: 4px;
+}
+
+.latest-card-title {
+  font-size: 11px;
+  color: #6e6e6e;
+}
+
+.latest-card-value {
+  font-size: 19px;
+  font-weight: 500;
+  color: #111;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.latest-card-unit {
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 400;
+  color: #6e6e6e;
 }
 
 /* Cursor tooltip. It is a child of uPlot's `.u-over`, positioned with a

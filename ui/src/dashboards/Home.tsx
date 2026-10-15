@@ -1,3 +1,4 @@
+import LatestStrip from '../components/LatestStrip'
 import TimeSeriesTile from '../components/TimeSeriesTile'
 
 const LIVING_ROOM = 'co2-sensor-living-room'
@@ -11,6 +12,7 @@ const LAUNDRY_ROOM = 'humidity-laundry-room'
 export default function Home() {
   return (
     <div class="dashboard">
+      <LatestStrip />
       <TimeSeriesTile
         wide
         title="Living room CO₂"
