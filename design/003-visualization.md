@@ -132,6 +132,9 @@ A fixed date range picker is always visible on the top right as a list of button
 As an example, the 30d button sets the selected time range to `[now - 30d, now]`, while `all` spans the full data range
 (earliest to newest point). The C button opens from / to datetime inputs underneath for custom ranges.
 
+`Ctrl+H` or `←` step the window back by its own length and `Ctrl+L` or `→` step it forward: with 30d selected,
+`Ctrl+H` gives `[now - 60d, now - 30d]`. A stepped window is no longer a preset, so it becomes a custom range.
+
 All chart tiles that have a time axis update to reflect the selected timerange. By default the 1d option is selected.
 The frontend resolves the selection to concrete timestamps and embeds them into every tile query.
 

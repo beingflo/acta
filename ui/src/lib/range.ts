@@ -32,6 +32,47 @@ export function setCustomRange(next: Range) {
   setPresetSignal('custom')
 }
 
+/**
+ * Step the selected window by its own length: -1 back in time, 1 forward. A 30d
+ * selection becomes `[now - 60d, now - 30d]`, which is no longer a preset, so
+ * the result is a custom range.
+ */
+export function shiftRange(direction: -1 | 1) {
+  const { from, to } = range()
+  const span = to.getTime() - from.getTime()
+  if (span <= 0) return
+  setCustomRange({
+    from: new Date(from.getTime() + direction * span),
+    to: new Date(to.getTime() + direction * span),
+  })
+}
+
+/** `Ctrl+H` / `←` step back, `Ctrl+L` / `→` step forward. */
+export function installRangeShortcuts(): () => void {
+  const onKey = (event: KeyboardEvent) => {
+    if (event.altKey || event.metaKey) return
+
+    const target = event.target as HTMLElement | null
+    if (
+      target &&
+      (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+    ) {
+      return
+    }
+
+    const letter = event.key.toLowerCase()
+    const back = event.key === 'ArrowLeft' || (event.ctrlKey && letter === 'h')
+    const forward = event.key === 'ArrowRight' || (event.ctrlKey && letter === 'l')
+    if (!back && !forward) return
+
+    event.preventDefault()
+    shiftRange(back ? -1 : 1)
+  }
+
+  window.addEventListener('keydown', onKey)
+  return () => window.removeEventListener('keydown', onKey)
+}
+
 const STALE_AFTER_MS = 10 * 60 * 1000
 
 /** Oldest and newest timestamps present in the data, captured at startup. */

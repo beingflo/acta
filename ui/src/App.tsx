@@ -6,7 +6,7 @@ import RangePicker from './components/RangePicker'
 import { DASHBOARDS } from './dashboards'
 import { fetchData } from './lib/api'
 import { fullscreenTile, installFullscreenShortcuts } from './lib/fullscreen'
-import { customRange, preset, setDataBounds } from './lib/range'
+import { customRange, installRangeShortcuts, preset, setDataBounds } from './lib/range'
 import { applyRangeFromUrl, dashboardPath, rangeQuery, readDashboard, writeUrl } from './lib/url'
 import './App.css'
 
@@ -25,6 +25,9 @@ export default function App() {
 
     const uninstallFullscreen = installFullscreenShortcuts()
     onCleanup(uninstallFullscreen)
+
+    const uninstallRange = installRangeShortcuts()
+    onCleanup(uninstallRange)
 
     void fetchData<{ mn: number; mx: number }>(
       'SELECT to_json(struct_pack(mn := epoch(CAST(min(timestamp) AS TIMESTAMP)), mx := epoch(CAST(max(timestamp) AS TIMESTAMP))))::VARCHAR FROM events',

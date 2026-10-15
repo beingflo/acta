@@ -191,6 +191,9 @@ body.fullscreen-tile {
 
 .latest-card {
   flex: 1 1 130px;
+  /* Grow to share the row, but never stretch into a single wide slab when a
+     dashboard has only one or two charts. */
+  max-width: 220px;
   display: flex;
   flex-direction: column;
   gap: 1px;
