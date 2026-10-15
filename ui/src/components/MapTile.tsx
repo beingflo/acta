@@ -12,7 +12,7 @@ import { range } from '../lib/range'
 // PMTiles archives served by the service (see `service/src/api.rs`), coarsest
 // first. Each archive's zoom range comes from its own header (the PMTiles
 // protocol exposes it as TileJSON), so nothing is hardcoded here: the world set
-// overzooms past z6 where no finer tile exists, `all` covers z9-12 everywhere
+// overzooms past z6 where no finer tile exists, `all` covers z7-12 everywhere
 // the fixes are, and `tier1` adds street detail (z13-15) where they are
 // frequent. Both extracts are derived from the fixes by `tools/map_regions.py`.
 const BASEMAPS = [

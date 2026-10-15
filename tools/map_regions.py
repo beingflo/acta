@@ -18,7 +18,7 @@ The two tiers keep the zoom bands disjoint, so each band is served by the most
 specific region:
 
     tier1: visited on >= 150 days  -> street level   (z13-15)
-    all:   visited on >=   1 day   -> everywhere     (z9-12)
+    all:   visited on >=   1 day   -> everywhere     (z7-12)
 
 `pmtiles extract --region=<file>`, unlike `--bbox`, only pulls tiles near where
 you actually go. The Protomaps build server resets long streams now and then, so
@@ -48,7 +48,10 @@ TILES = Path("tiles")  # archives live here
 REGIONS = TILES / "regions"  # generated GeoJSON lives here
 CELL = 0.005  # grid cell size in degrees (~550 m)
 BUFFER_KM = 0.5  # ribbon padding around the track
-TIERS = "tier1:150:13:15,all:1:9:12"  # name:min_days:minzoom:maxzoom
+# The `all` tier runs from z7 so the zoom ranges stay contiguous: world covers
+# 0-6, this covers 7-12, tier1 covers 13-15. Without z7-8 the map upscales z6
+# tiles there, which is a lot of missing detail for 23 MB of tiles.
+TIERS = "tier1:150:13:15,all:1:7:12"  # name:min_days:minzoom:maxzoom
 DOWNLOAD_THREADS = 8
 ATTEMPTS = 3
 WORLD_MAXZOOM = 8
