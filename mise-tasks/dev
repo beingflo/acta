@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+#MISE description="Run the service and frontend dev servers together"
+set -euo pipefail
+
+# Job control gives each background task its own process group, so one group
+# kill takes a server and its children (cargo, vite) down together.
+set -m
+mise run service:dev &
+service=$!
+mise run ui:dev &
+ui=$!
+
+cleanup() {
+  for pid in "$service" "$ui"; do
+    kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+  done
+}
+trap cleanup EXIT INT TERM
+
+# bash 3.2 has no `wait -n`: poll until one side goes away, then stop the rest.
+while kill -0 "$service" 2>/dev/null && kill -0 "$ui" 2>/dev/null; do
+  sleep 1
+done

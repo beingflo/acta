@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Run the service dev server on 127.0.0.1:8080"
+set -euo pipefail
+
+# Release on purpose: the app is query-heavy, and an unoptimised build is
+# several times slower, which would misreport query performance.
+exec cargo run --release --manifest-path service/Cargo.toml

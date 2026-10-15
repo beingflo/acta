@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run the frontend dev server (Vite proxies /api and /tiles to the service)"
+set -euo pipefail
+
+cd ui
+exec npm run dev
