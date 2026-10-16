@@ -66,10 +66,13 @@ only then are its inputs moved to `.trash/`. Queries hold a shared lock and the 
 observes a bucket twice or not at all. If the process stops between the rename and the move, the next pass finds both
 the tier file and its inputs and discards the inputs.
 
+`.trash/` is swept on its own slower cadence (ten minutes by default) rather than every compaction pass, since files
+are only removed once they age past the retention window.
+
 ## Data Lifecycle / retention
 
 Nothing is expired. The tiers exist to bound the number of files a query opens, not to delete data. `.trash/` only
-ever holds superseded files and is emptied after a grace period.
+ever holds superseded files; it is swept periodically and anything younger than the retention window is left alone.
 
 ## Backup
 

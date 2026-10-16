@@ -29,10 +29,18 @@ pub struct Context {
 pub async fn run(ctx: Arc<Context>) {
     let mut ticker = tokio::time::interval(ctx.opts.compaction_interval);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    // Trash only needs sweeping occasionally. Doing it every compaction pass
+    // would `lstat` every retired file once a minute for no benefit, so it runs
+    // on its own slower cadence (and once at startup, to catch up after a stop).
+    let mut next_gc = tokio::time::Instant::now();
     loop {
         ticker.tick().await;
         if let Err(err) = run_once(&ctx).await {
             tracing::warn!(error = %err, "compaction pass failed");
+        }
+        if tokio::time::Instant::now() >= next_gc {
+            storage::gc_trash(&ctx.trash, ctx.opts.trash_retention);
+            next_gc = tokio::time::Instant::now() + ctx.opts.trash_gc_interval;
         }
     }
 }
@@ -41,7 +49,6 @@ pub async fn run_once(ctx: &Context) -> Result<(), String> {
     compact_hours(ctx).await?;
     compact_days(ctx).await?;
     compact_months(ctx).await?;
-    storage::gc_trash(&ctx.trash, ctx.opts.trash_retention);
     Ok(())
 }
 

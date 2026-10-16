@@ -443,10 +443,15 @@ def run_source(
 
 
 def report(stats: Stats, stop: threading.Event) -> None:
+    last_sent = 0
+    last_time = time.monotonic()
     while not stop.wait(30):
         sent, errors, per_source = stats.snapshot()
+        now = time.monotonic()
+        rate = (sent - last_sent) / max(now - last_time, 1e-9) * 60
+        last_sent, last_time = sent, now
         detail = " ".join(f"{key}={value}" for key, value in sorted(per_source.items()))
-        print(f"[ingest] sent={sent} errors={errors} {detail}", flush=True)
+        print(f"[ingest] {rate:6.1f} rows/min  sent={sent} errors={errors} {detail}", flush=True)
 
 
 # --- entry point -------------------------------------------------------------
@@ -520,7 +525,11 @@ def main() -> int:
     sent, errors, per_source = stats.snapshot()
     minutes = (time.monotonic() - stats.started) / 60
     detail = " ".join(f"{key}={value}" for key, value in sorted(per_source.items()))
-    print(f"[ingest] stopped after {minutes:.1f} min: sent={sent} errors={errors} {detail}", flush=True)
+    print(
+        f"[ingest] stopped after {minutes:.1f} min: sent={sent} "
+        f"({sent / max(minutes, 1e-9):.1f} rows/min) errors={errors} {detail}",
+        flush=True,
+    )
     return 0
 
 

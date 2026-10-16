@@ -25,6 +25,7 @@ pub struct WriteOptions {
     pub compaction_grace: Duration,
     pub row_group_size: usize,
     pub trash_retention: Duration,
+    pub trash_gc_interval: Duration,
     pub ingest_max_body_bytes: usize,
     pub ingest_max_batch: usize,
 }
@@ -61,9 +62,10 @@ impl Settings {
                 300_000,
             )?),
             row_group_size: env_parse("ACTA_ROW_GROUP_SIZE", 250_000)?,
-            trash_retention: Duration::from_millis(env_parse(
-                "ACTA_TRASH_RETENTION_MS",
-                86_400_000,
+            trash_retention: Duration::from_millis(env_parse("ACTA_TRASH_RETENTION_MS", 86_400_000)?),
+            trash_gc_interval: Duration::from_millis(env_parse(
+                "ACTA_TRASH_GC_INTERVAL_MS",
+                600_000,
             )?),
             ingest_max_body_bytes: env_parse("ACTA_INGEST_MAX_BODY_BYTES", 16 * 1024 * 1024)?,
             ingest_max_batch: env_parse("ACTA_INGEST_MAX_BATCH", 10_000)?,
