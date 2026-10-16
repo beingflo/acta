@@ -17,7 +17,7 @@ This document outlines the phases of development of Acta.
 
 ## Phase 3: Write path
 
-[ ] Build endpoint that accepts arbitrary data
+[x] Build endpoint that accepts arbitrary data
 [ ] Build endpoint that accepts GPS data
 [ ] Build Heuried scraper
 [ ] Build authentication

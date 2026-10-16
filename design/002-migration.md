@@ -91,7 +91,9 @@ Their payload shapes:
 ## Output layout
 
 Partial results are written to `migration/out/<source>.parquet` and combined into a single `data/data.parquet`, sorted
-by source and then timestamp, with 250k-row row groups.
+by source and then timestamp, with 250k-row row groups. This file is the starting point of the dataset; the ingestion
+path (`design/004-service.md`) adds further files to the same directory, and the read path unions all of them. The
+source-major ordering below is a property of each file, not of the directory as a whole.
 
 Sorting by source first is what makes reads fast. Row-group statistics on `source` let a `source = ...` filter skip
 every other source's row groups, and keeping a source's rows contiguous keeps the Variant layout homogeneous within a

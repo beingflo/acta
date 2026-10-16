@@ -11,6 +11,22 @@ pub struct Settings {
     pub ui_dir: PathBuf,
     pub tiles_dir: PathBuf,
     pub db: DbOptions,
+    pub write: WriteOptions,
+}
+
+/// Write path configuration.
+#[derive(Clone, Debug)]
+pub struct WriteOptions {
+    pub flush_interval: Duration,
+    pub flush_max_rows: usize,
+    pub flush_max_bytes: usize,
+    pub backlog: usize,
+    pub compaction_interval: Duration,
+    pub compaction_grace: Duration,
+    pub row_group_size: usize,
+    pub trash_retention: Duration,
+    pub ingest_max_body_bytes: usize,
+    pub ingest_max_batch: usize,
 }
 
 impl Settings {
@@ -31,7 +47,35 @@ impl Settings {
             max_response_bytes: env_parse("ACTA_MAX_RESPONSE_BYTES", 8 * 1024 * 1024)?,
         };
 
-        Ok(Self { addr, ui_dir, tiles_dir, db })
+        let write = WriteOptions {
+            flush_interval: Duration::from_millis(env_parse("ACTA_FLUSH_INTERVAL_MS", 10_000)?),
+            flush_max_rows: env_parse("ACTA_FLUSH_MAX_ROWS", 50_000)?,
+            flush_max_bytes: env_parse("ACTA_FLUSH_MAX_BYTES", 64 * 1024 * 1024)?,
+            backlog: env_parse("ACTA_INGEST_BACKLOG", 256)?,
+            compaction_interval: Duration::from_millis(env_parse(
+                "ACTA_COMPACTION_INTERVAL_MS",
+                60_000,
+            )?),
+            compaction_grace: Duration::from_millis(env_parse(
+                "ACTA_COMPACTION_GRACE_MS",
+                300_000,
+            )?),
+            row_group_size: env_parse("ACTA_ROW_GROUP_SIZE", 250_000)?,
+            trash_retention: Duration::from_millis(env_parse(
+                "ACTA_TRASH_RETENTION_MS",
+                86_400_000,
+            )?),
+            ingest_max_body_bytes: env_parse("ACTA_INGEST_MAX_BODY_BYTES", 16 * 1024 * 1024)?,
+            ingest_max_batch: env_parse("ACTA_INGEST_MAX_BATCH", 10_000)?,
+        };
+
+        Ok(Self {
+            addr,
+            ui_dir,
+            tiles_dir,
+            db,
+            write,
+        })
     }
 }
 

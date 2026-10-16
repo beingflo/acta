@@ -28,9 +28,14 @@ queries to derive data are supported, like geofence queries on GPS data to deter
 The Rust HTTP service accepts arbitrary JSON data and buffers it in memory for some seconds. Then, it writes the
 data to a small Parquet file where the payload is stored semi-structured using the Variant type.
 
-Periodically, the service aggregates the small files and writes back bigger, e.g., hourly and then daily files, sorted
-by source and then time. Grouping a source's rows together keeps each row group's Variant payload homogeneous and lets
-the read path skip other sources' row groups entirely.
+Files are bucketed by *arrival* time, not by the `timestamp` they carry. A batch lands in the current 10 s window, and
+compaction folds windows into hours, days and months. A closed arrival bucket therefore never receives another row,
+which is what keeps compaction append-only. The `timestamp` column stays the event time (supplied or server time); a
+late point lands in a newer arrival bucket and is still returned by any query whose range matches it.
+
+Every tier covers a disjoint span of arrival time, so each row lives in exactly one file. Within a file rows are
+sorted by source and then time; keeping a source's rows contiguous keeps each row group's Variant payload homogeneous
+enough to shred and lets row-group statistics skip other sources. All data is retained.
 
 ### Operation
 

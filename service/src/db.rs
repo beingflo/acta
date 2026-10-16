@@ -67,9 +67,6 @@ impl Db {
         if !data_dir.is_dir() {
             return Err(format!("data dir {} is not a directory", data_dir.display()));
         }
-        if !has_parquet(&data_dir)? {
-            return Err(format!("no *.parquet files in {}", data_dir.display()));
-        }
 
         let options = DbOptions { data_dir, ..options };
         let mut pool = Vec::with_capacity(options.pool_size);
@@ -79,6 +76,11 @@ impl Db {
         let permits = Arc::new(Semaphore::new(options.pool_size));
 
         Ok(Self { inner: Arc::new(Inner { options, pool: Mutex::new(pool), permits }) })
+    }
+
+    /// The canonicalized data directory the pool reads from.
+    pub fn data_dir(&self) -> &std::path::Path {
+        &self.inner.options.data_dir
     }
 
     /// Run `sql`, expecting exactly one row with one `VARCHAR` column holding the
@@ -187,7 +189,7 @@ fn connect(options: &DbOptions) -> Result<Connection, String> {
          SET enable_external_access = false;\n\
          SET lock_configuration = true;\n\
          CREATE VIEW events AS \
-             SELECT timestamp, source, data FROM read_parquet('{glob}');"
+             SELECT timestamp, source, data FROM read_parquet('{glob}', union_by_name=true);"
     );
     conn.execute_batch(&setup).map_err(|e| e.to_string())?;
 
@@ -198,15 +200,4 @@ impl DbOptions {
     fn glob_pattern(&self) -> String {
         format!("{}/*.parquet", self.data_dir.display())
     }
-}
-
-fn has_parquet(dir: &std::path::Path) -> Result<bool, String> {
-    let entries = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| e.to_string())?;
-        if entry.path().extension().is_some_and(|ext| ext == "parquet") {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }
