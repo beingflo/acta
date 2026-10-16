@@ -43,7 +43,7 @@ impl Settings {
             data_dir: PathBuf::from(env_str("ACTA_DATA_DIR", "data")),
             pool_size: env_parse("ACTA_POOL_SIZE", 4)?,
             memory_limit: env_str("ACTA_MEMORY_LIMIT", "1GB"),
-            threads: env_parse("ACTA_THREADS", 2)?,
+            threads: env_parse("ACTA_THREADS", 1)?,
             query_timeout: Duration::from_millis(env_parse("ACTA_QUERY_TIMEOUT_MS", 10_000)?),
             max_response_bytes: env_parse("ACTA_MAX_RESPONSE_BYTES", 8 * 1024 * 1024)?,
         };
@@ -59,7 +59,7 @@ impl Settings {
             )?),
             compaction_grace: Duration::from_millis(env_parse(
                 "ACTA_COMPACTION_GRACE_MS",
-                300_000,
+                30_000,
             )?),
             row_group_size: env_parse("ACTA_ROW_GROUP_SIZE", 250_000)?,
             trash_retention: Duration::from_millis(env_parse("ACTA_TRASH_RETENTION_MS", 86_400_000)?),
