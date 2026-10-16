@@ -31,10 +31,11 @@ arbitrary JSON stored as-is in the `Variant` column, and `timestamp` is the even
 epoch number. A missing or `null` timestamp defaults to the server's receive time, so every row carries an event time.
 
 Rows are buffered in memory and flushed to one `hot-` file every 10 s, or earlier if the buffer would exceed its row
-or byte limit, and once more on shutdown. A flush is atomic: the file is written to `.staging/`, synced, and renamed
-into `data/`, so it becomes visible complete and is immediately queryable — hot data does not wait for compaction.
-The handler validates the batch and enqueues it; body size, batch length and backlog are all bounded, so a stalled
-writer applies backpressure instead of growing memory.
+or byte limit, and once more on shutdown. Buffering and writing are separate tasks joined by a small queue, so a flush
+in progress never holds up accepting the next batch; only a writer that cannot keep up applies backpressure. A flush
+is atomic: the file is written to `.staging/`, synced, and renamed into `data/`, so it becomes visible complete and is
+immediately queryable — hot data does not wait for compaction. The handler validates the batch and enqueues it; body
+size, batch length and backlog are all bounded, so a stalled writer applies backpressure instead of growing memory.
 
 ### Layout
 

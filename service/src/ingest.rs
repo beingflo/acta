@@ -74,7 +74,8 @@ pub async fn prepare(data_dir: &Path) -> Result<(), String> {
 pub struct Ingest {
     handle: IngestHandle,
     shutdown: Arc<Notify>,
-    flush_task: JoinHandle<()>,
+    buffer_task: JoinHandle<()>,
+    writer_task: JoinHandle<()>,
 }
 
 impl Ingest {
@@ -82,33 +83,38 @@ impl Ingest {
         self.handle.clone()
     }
 
-    /// Flush whatever is buffered and wait for the write task to finish.
+    /// Hand the buffered rows to the writer and wait for both loops to finish.
     pub async fn shutdown(self) {
         self.shutdown.notify_one();
-        let _ = tokio::time::timeout(Duration::from_secs(15), self.flush_task).await;
+        let _ = tokio::time::timeout(Duration::from_secs(15), self.buffer_task).await;
+        let _ = tokio::time::timeout(Duration::from_secs(15), self.writer_task).await;
     }
 }
 
-/// Start the flush and compaction tasks.
+/// Full buffers that may wait behind the one being written. One is enough to
+/// keep buffering through a flush while bounding memory to a few batches.
+const FLUSH_QUEUE: usize = 1;
+
+/// Start the buffer, writer and compaction tasks.
 pub fn start(data_dir: PathBuf, opts: WriteOptions, lock: Arc<RwLock<()>>) -> Ingest {
     let (tx, rx) = mpsc::channel(opts.backlog.max(1));
+    let (flush_tx, flush_rx) = mpsc::channel::<Vec<Row>>(FLUSH_QUEUE);
 
-    let flush_data_dir = data_dir.clone();
-    let flush_staging = storage::staging_dir(&data_dir);
-    let flush_opts = opts.clone();
+    let writer_data_dir = data_dir.clone();
+    let writer_staging = storage::staging_dir(&data_dir);
+    let writer_opts = opts.clone();
+    let writer_task = tokio::spawn(async move {
+        if let Err(err) = writer_loop(flush_rx, writer_data_dir, writer_staging, writer_opts).await {
+            tracing::error!(error = %err, "ingest writer loop stopped");
+        }
+    });
+
+    let buffer_opts = opts.clone();
     let shutdown = Arc::new(Notify::new());
-    let flush_shutdown = Arc::clone(&shutdown);
-    let flush_task = tokio::spawn(async move {
-        if let Err(err) = flush_loop(
-            rx,
-            flush_data_dir,
-            flush_staging,
-            flush_opts,
-            flush_shutdown,
-        )
-        .await
-        {
-            tracing::error!(error = %err, "ingest flush loop stopped");
+    let buffer_shutdown = Arc::clone(&shutdown);
+    let buffer_task = tokio::spawn(async move {
+        if let Err(err) = buffer_loop(rx, flush_tx, buffer_opts, buffer_shutdown).await {
+            tracing::error!(error = %err, "ingest buffer loop stopped");
         }
     });
 
@@ -125,7 +131,8 @@ pub fn start(data_dir: PathBuf, opts: WriteOptions, lock: Arc<RwLock<()>>) -> In
     Ingest {
         handle: IngestHandle { tx },
         shutdown,
-        flush_task,
+        buffer_task,
+        writer_task,
     }
 }
 
@@ -199,15 +206,13 @@ fn parse_timestamp_str(text: &str) -> Result<i64, String> {
 struct Buffer {
     rows: Vec<Row>,
     bytes: usize,
-    limit_rows: usize,
 }
 
 impl Buffer {
-    fn new(limit_rows: usize) -> Self {
+    fn new() -> Self {
         Self {
             rows: Vec::new(),
             bytes: 0,
-            limit_rows,
         }
     }
 
@@ -225,31 +230,18 @@ impl Buffer {
         self.bytes = 0;
         Some(std::mem::take(&mut self.rows))
     }
-
-    /// Put a failed flush back into the buffer. Bounded by a hard cap so a
-    /// persistent write failure cannot grow memory without limit.
-    fn restore(&mut self, rows: Vec<Row>) {
-        let hard_cap = self.limit_rows.saturating_mul(4).max(1);
-        if self.rows.len() + rows.len() > hard_cap {
-            tracing::error!(
-                rows = rows.len(),
-                cap = hard_cap,
-                "dropping rows: buffer hard cap reached"
-            );
-            return;
-        }
-        self.push(rows);
-    }
 }
 
-async fn flush_loop(
+/// Receive batches into a buffer and hand full buffers to the writer. The write
+/// happens on another task, so buffering the next batch never waits for a
+/// flush; only a writer that cannot keep up pushes back.
+async fn buffer_loop(
     mut rx: mpsc::Receiver<Vec<Row>>,
-    data_dir: PathBuf,
-    staging: PathBuf,
+    flush_tx: mpsc::Sender<Vec<Row>>,
     opts: WriteOptions,
     shutdown: Arc<Notify>,
 ) -> Result<(), String> {
-    let mut buffer = Buffer::new(opts.flush_max_rows);
+    let mut buffer = Buffer::new();
     let mut ticker = tokio::time::interval(opts.flush_interval);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
     ticker.tick().await; // the first tick fires immediately
@@ -261,54 +253,85 @@ async fn flush_loop(
                 Some(rows) => {
                     buffer.push(rows);
                     if buffer.rows.len() >= opts.flush_max_rows || buffer.bytes >= opts.flush_max_bytes {
-                        flush(&mut buffer, &data_dir, &staging, &opts).await;
+                        hand_off(&mut buffer, &flush_tx).await;
                     }
                 }
                 None => break,
             },
             _ = ticker.tick() => {
                 if !buffer.rows.is_empty() {
-                    flush(&mut buffer, &data_dir, &staging, &opts).await;
+                    hand_off(&mut buffer, &flush_tx).await;
                 }
             }
         }
     }
 
-    flush(&mut buffer, &data_dir, &staging, &opts).await;
+    hand_off(&mut buffer, &flush_tx).await;
     Ok(())
 }
 
-async fn flush(buffer: &mut Buffer, data_dir: &Path, staging: &Path, opts: &WriteOptions) {
-    let Some(rows) = buffer.take() else {
-        return;
-    };
-    let count = rows.len();
-    let name = unique_hot_name(data_dir);
-    let staging = staging.to_path_buf();
-    let data_dir = data_dir.to_path_buf();
-    let row_group_size = opts.row_group_size;
-
-    let outcome = tokio::task::spawn_blocking(move || -> Result<(), (String, Vec<Row>)> {
-        let staged = match parquet::write_hot(&staging, &name, &rows, row_group_size) {
-            Ok(path) => path,
-            Err(err) => return Err((err, rows)),
-        };
-        let target = data_dir.join(&name);
-        if let Err(err) = std::fs::rename(&staged, &target) {
-            return Err((format!("{}: {err}", target.display()), rows));
-        }
-        Ok(())
-    })
-    .await;
-
-    match outcome {
-        Ok(Ok(())) => tracing::debug!(rows = count, "flushed hot file"),
-        Ok(Err((err, rows))) => {
-            tracing::error!(error = %err, rows = rows.len(), "flush failed, re-buffering rows");
-            buffer.restore(rows);
-        }
-        Err(err) => tracing::error!(error = %err, rows = count, "flush task failed, rows lost"),
+async fn hand_off(buffer: &mut Buffer, tx: &mpsc::Sender<Vec<Row>>) {
+    if let Some(rows) = buffer.take()
+        && tx.send(rows).await.is_err()
+    {
+        tracing::error!("flush writer is gone; dropping buffered rows");
     }
+}
+
+async fn writer_loop(
+    mut rx: mpsc::Receiver<Vec<Row>>,
+    data_dir: PathBuf,
+    staging: PathBuf,
+    opts: WriteOptions,
+) -> Result<(), String> {
+    while let Some(rows) = rx.recv().await {
+        write_buffer(&data_dir, &staging, &opts, rows).await;
+    }
+    Ok(())
+}
+
+/// Write one buffer, retrying a few times so a transient failure does not lose
+/// data. A persistent failure drops the batch, loudly.
+async fn write_buffer(data_dir: &Path, staging: &Path, opts: &WriteOptions, rows: Vec<Row>) {
+    let count = rows.len();
+    let row_group_size = opts.row_group_size;
+    let mut rows = rows;
+
+    for attempt in 1..=3u32 {
+        let name = unique_hot_name(data_dir);
+        let staging = staging.to_path_buf();
+        let target = data_dir.join(&name);
+        let batch = rows;
+        let outcome = tokio::task::spawn_blocking(move || -> Result<(), (String, Vec<Row>)> {
+            let staged = match parquet::write_hot(&staging, &name, &batch, row_group_size) {
+                Ok(path) => path,
+                Err(err) => return Err((err, batch)),
+            };
+            if let Err(err) = std::fs::rename(&staged, &target) {
+                return Err((format!("{}: {err}", target.display()), batch));
+            }
+            Ok(())
+        })
+        .await;
+
+        match outcome {
+            Ok(Ok(())) => {
+                tracing::debug!(rows = count, "flushed hot file");
+                return;
+            }
+            Ok(Err((err, batch))) => {
+                rows = batch;
+                tracing::warn!(error = %err, attempt, rows = rows.len(), "flush failed; retrying");
+                tokio::time::sleep(Duration::from_millis(200 * u64::from(attempt))).await;
+            }
+            Err(err) => {
+                tracing::error!(error = %err, rows = count, "flush task failed; rows lost");
+                return;
+            }
+        }
+    }
+
+    tracing::error!(rows = rows.len(), "dropping rows after repeated flush failures");
 }
 
 fn unique_hot_name(data_dir: &Path) -> String {
