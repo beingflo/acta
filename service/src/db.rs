@@ -189,7 +189,7 @@ fn connect(options: &DbOptions) -> Result<Connection, String> {
          SET enable_external_access = false;\n\
          SET lock_configuration = true;\n\
          CREATE VIEW events AS \
-             SELECT timestamp, source, data FROM read_parquet('{glob}', union_by_name=true);"
+             SELECT timestamp, source, data FROM read_parquet('{glob}');"
     );
     conn.execute_batch(&setup).map_err(|e| e.to_string())?;
 

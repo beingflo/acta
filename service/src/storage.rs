@@ -13,12 +13,14 @@ pub const STAGING_DIR: &str = ".staging";
 pub const TRASH_DIR: &str = ".trash";
 pub const SEED_FILE: &str = "_seed.parquet";
 
+pub const RECENT_MS: i64 = 300_000;
 pub const HOUR_MS: i64 = 3_600_000;
 pub const DAY_MS: i64 = 86_400_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tier {
     Hot,
+    Recent,
     Hour,
     Day,
     Month,
@@ -99,6 +101,9 @@ fn parse_name(name: &str) -> Option<(Tier, i64)> {
         // `hot-<flush_ms>`; a trailing `-<seq>` is tolerated for uniqueness.
         let ms = rest.split('-').next()?.parse().ok()?;
         Some((Tier::Hot, ms))
+    } else if let Some(rest) = stem.strip_prefix("recent-") {
+        let seconds: i64 = rest.parse().ok()?;
+        Some((Tier::Recent, seconds * 1000))
     } else if let Some(rest) = stem.strip_prefix("hour-") {
         let seconds: i64 = rest.parse().ok()?;
         Some((Tier::Hour, seconds * 1000))
@@ -118,6 +123,10 @@ pub fn hot_name(flush_ms: i64) -> String {
     format!("hot-{flush_ms}.parquet")
 }
 
+pub fn recent_name(recent_start_ms: i64) -> String {
+    format!("recent-{}.parquet", recent_start_ms / 1000)
+}
+
 pub fn hour_name(hour_start_ms: i64) -> String {
     format!("hour-{}.parquet", hour_start_ms / 1000)
 }
@@ -128,6 +137,10 @@ pub fn day_name(day_start_ms: i64) -> String {
 
 pub fn month_name(month_start_ms: i64) -> String {
     format!("month-{}.parquet", format_date(month_start_ms, "%Y-%m"))
+}
+
+pub fn recent_start_ms(ms: i64) -> i64 {
+    ms - ms.rem_euclid(RECENT_MS)
 }
 
 pub fn hour_start_ms(ms: i64) -> i64 {

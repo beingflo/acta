@@ -46,9 +46,44 @@ pub async fn run(ctx: Arc<Context>) {
 }
 
 pub async fn run_once(ctx: &Context) -> Result<(), String> {
+    compact_recents(ctx).await?;
     compact_hours(ctx).await?;
     compact_days(ctx).await?;
     compact_months(ctx).await?;
+    Ok(())
+}
+
+/// Fold the 10 s hot files of a finished five-minute bucket into one file. This
+/// caps the hot tail at a bucket's worth of files instead of a whole hour's.
+async fn compact_recents(ctx: &Context) -> Result<(), String> {
+    let files = list(ctx)?;
+    let now = storage::now_ms();
+    let existing: HashSet<String> = files
+        .iter()
+        .filter(|f| f.tier == Tier::Recent)
+        .map(|f| f.name.clone())
+        .collect();
+
+    let mut groups: BTreeMap<i64, Vec<TierFile>> = BTreeMap::new();
+    for file in files.iter().filter(|f| f.tier == Tier::Hot) {
+        groups
+            .entry(storage::recent_start_ms(file.start_ms))
+            .or_default()
+            .push(file.clone());
+    }
+
+    for (bucket, mut group) in groups {
+        let name = storage::recent_name(bucket);
+        if existing.contains(&name) {
+            trash_inputs(ctx, &group).await?;
+            continue;
+        }
+        if now < bucket + storage::RECENT_MS + ctx.grace_ms {
+            continue;
+        }
+        group.sort_by_key(|f| f.start_ms);
+        merge_and_install(ctx, &name, &group).await?;
+    }
     Ok(())
 }
 
@@ -60,9 +95,16 @@ async fn compact_hours(ctx: &Context) -> Result<(), String> {
         .filter(|f| f.tier == Tier::Hour)
         .map(|f| f.name.clone())
         .collect();
+    // An hour can only be built once every hot file in it has been folded into
+    // a recent file, otherwise those rows would be missing from the hour.
+    let hot_hours: HashSet<i64> = files
+        .iter()
+        .filter(|f| f.tier == Tier::Hot)
+        .map(|f| storage::hour_start_ms(f.start_ms))
+        .collect();
 
     let mut groups: BTreeMap<i64, Vec<TierFile>> = BTreeMap::new();
-    for file in files.iter().filter(|f| f.tier == Tier::Hot) {
+    for file in files.iter().filter(|f| f.tier == Tier::Recent) {
         groups
             .entry(storage::hour_start_ms(file.start_ms))
             .or_default()
@@ -73,6 +115,9 @@ async fn compact_hours(ctx: &Context) -> Result<(), String> {
         let name = storage::hour_name(hour);
         if existing.contains(&name) {
             trash_inputs(ctx, &group).await?;
+            continue;
+        }
+        if hot_hours.contains(&hour) {
             continue;
         }
         if now < hour + storage::HOUR_MS + ctx.grace_ms {
@@ -92,11 +137,11 @@ async fn compact_days(ctx: &Context) -> Result<(), String> {
         .filter(|f| f.tier == Tier::Day)
         .map(|f| f.name.clone())
         .collect();
-    // A day can only be built once every hour in it has been folded, otherwise
-    // the still-hot rows would be missing from the day file.
-    let hot_days: HashSet<i64> = files
+    // A day can only be built once every finer file in it has been folded,
+    // otherwise those rows would be missing from the day.
+    let finer_days: HashSet<i64> = files
         .iter()
-        .filter(|f| f.tier == Tier::Hot)
+        .filter(|f| matches!(f.tier, Tier::Hot | Tier::Recent))
         .map(|f| storage::day_start_ms(f.start_ms))
         .collect();
 
@@ -114,7 +159,7 @@ async fn compact_days(ctx: &Context) -> Result<(), String> {
             trash_inputs(ctx, &group).await?;
             continue;
         }
-        if hot_days.contains(&day) {
+        if finer_days.contains(&day) {
             continue;
         }
         if now < day + storage::DAY_MS + ctx.grace_ms {
@@ -138,7 +183,7 @@ async fn compact_months(ctx: &Context) -> Result<(), String> {
     // month is not fully folded yet.
     let unfinished: HashSet<i64> = files
         .iter()
-        .filter(|f| matches!(f.tier, Tier::Hot | Tier::Hour))
+        .filter(|f| matches!(f.tier, Tier::Hot | Tier::Recent | Tier::Hour))
         .map(|f| storage::month_start_ms(f.start_ms))
         .collect();
 

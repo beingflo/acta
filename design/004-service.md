@@ -10,9 +10,9 @@ is frozen after setup, and every query runs under a timeout and a response size 
 for the query model.
 
 The view is bound afresh on every query, so files written by the ingestion path are picked up without recreating the
-pool, and files removed by compaction disappear. It reads with `union_by_name=true` so a future added column cannot
-silently vanish depending on file order. A zero-row `_seed.parquet` is written when the directory is empty, because
-`read_parquet` cannot bind an empty glob.
+pool, and files removed by compaction disappear. The schema is fixed (`timestamp, source, data`), so the read does not
+union by name: that costs roughly twice as much per file and buys nothing here. A zero-row `_seed.parquet` is written
+when the directory is empty, because `read_parquet` cannot bind an empty glob.
 
 The built frontend (`ui/dist`) is served by the same process; unknown paths fall back to `index.html` for the
 single-page app.
@@ -42,6 +42,7 @@ All files live flat in `data/` and share the schema `timestamp TIMESTAMPTZ, sour
 filename encodes the arrival bucket:
 
 - `hot-<flush_ms>.parquet` — one per flush (10 s by default)
+- `recent-<recent_start_s>.parquet` — one per five-minute bucket
 - `hour-<hour_start_s>.parquet`
 - `day-<YYYY-MM-DD>.parquet`
 - `month-<YYYY-MM>.parquet`
@@ -57,9 +58,11 @@ matches neither, so only complete, current files are visible.
 ### Compaction
 
 A background pass runs every minute and folds closed arrival buckets into the next tier: the `hot-` files of a
-finished hour into one `hour-` file, an hour's worth of `hour-` files of a finished day into one `day-` file, and
-likewise days into `month-` files. Each output is rewritten `ORDER BY source, timestamp`. Only fully closed buckets
-are touched, so a bucket is written once and never reopened.
+finished five-minute bucket into one `recent-` file, a finished hour's `recent-` files into one `hour-` file, an
+hour's worth of `hour-` files of a finished day into one `day-` file, and likewise days into `month-` files. Each
+output is rewritten `ORDER BY source, timestamp`. Only fully closed buckets are touched, so a bucket is written once
+and never reopened. The five-minute tier is what keeps the hot tail bounded: without it a whole hour of 10 s files
+would be live at once, and every query pays a footer read for each one.
 
 Compaction replaces files rather than adding them. The merged file is built in `.staging/`, renamed into `data/`, and
 only then are its inputs moved to `.trash/`. Queries hold a shared lock and the swap an exclusive one, so no query
@@ -84,6 +87,7 @@ compaction swap takes, so a snapshot coincides with neither half of a swap.
 `mise run test` runs the hurl scenarios against a running service's read API (see `design/003-visualization.md`).
 `mise run test:ingest` (`tools/simulate_ingest.py`) keeps posting realistic data for every source until interrupted,
 which exercises the whole write path including tier compaction. It targets `ACTA_URL` (default the dev server on
-`127.0.0.1:8080`); `--fast` compresses the cadence and `--duration` bounds the run. To watch a clean dataset, point
-a service at a scratch `ACTA_DATA_DIR` or move `data/data.parquet` aside — the migration regenerates it from
-`traces.parquet`.
+`127.0.0.1:8080`); `--fast` compresses the cadence and `--duration` bounds the run. `--load` switches to load-test
+mode: it ramps concurrent connections until throughput plateaus or errors rise, then holds, reporting requests/s,
+rows/s and latency percentiles. To test with a clean dataset, point a service at a scratch `ACTA_DATA_DIR` or move
+`data/data.parquet` aside — the migration regenerates it from `traces.parquet`.

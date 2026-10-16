@@ -12,6 +12,12 @@ files (and a day or more for daily files).
     mise run test:ingest --fast              # 10x faster cadence
     mise run test:ingest --duration 120      # stop after two minutes
 
+Load-test mode ramps concurrency until throughput plateaus, then holds there,
+reporting requests/s, rows/s and latency percentiles:
+
+    mise run test:ingest --load --duration 60
+    mise run test:ingest --load --load-batch 500 --load-max 64
+
 Run `mise run test:ingest --help` for the flags mise exposes to completion.
 
 Only the standard library is used, so no virtualenv is required.
@@ -20,15 +26,18 @@ Only the standard library is used, so no virtualenv is required.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import math
 import os
 import random
 import signal
+import ssl
 import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -454,6 +463,352 @@ def report(stats: Stats, stop: threading.Event) -> None:
         print(f"[ingest] {rate:6.1f} rows/min  sent={sent} errors={errors} {detail}", flush=True)
 
 
+# --- load-test mode ----------------------------------------------------------
+
+
+def build_load_bodies(rng: random.Random, batch: int, count: int) -> list[tuple[bytes, int]]:
+    """Pre-generate request bodies so request generation is not the bottleneck.
+
+    Timestamps are omitted, so the service stamps arrival time and the bodies can
+    be reused freely.
+    """
+    generators = [
+        Co2Sensor(rng),
+        LaundrySensor(rng),
+        BrightnessBarometer(rng),
+        Visitors(rng),
+        Location(rng, 30.0),
+        WideEvents(rng),
+    ]
+    bodies = []
+    for _ in range(count):
+        rows: list[dict] = []
+        index = 0
+        while len(rows) < batch:
+            items = generators[index % len(generators)].tick()
+            index += 1
+            for item in items:
+                rows.append({"source": item["source"], "data": item["data"]})
+                if len(rows) >= batch:
+                    break
+        bodies.append((json.dumps(rows).encode(), len(rows)))
+    return bodies
+
+
+class AsyncGate:
+    """Lets the controller change the number of active workers without restarting them."""
+
+    def __init__(self) -> None:
+        self._cond = asyncio.Condition()
+        self._target = 1
+        self._stopped = False
+
+    async def set_target(self, target: int) -> None:
+        async with self._cond:
+            self._target = max(0, target)
+            self._cond.notify_all()
+
+    async def wait_turn(self, index: int) -> bool:
+        async with self._cond:
+            while not self._stopped and index >= self._target:
+                await self._cond.wait()
+            return not self._stopped
+
+    async def stop(self) -> None:
+        async with self._cond:
+            self._stopped = True
+            self._cond.notify_all()
+
+
+class LoadMetrics:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._reset_interval()
+        self.total_requests = 0
+        self.total_rows = 0
+        self.total_bytes = 0
+        self.total_errors = 0
+
+    def _reset_interval(self) -> None:
+        self.requests = 0
+        self.rows = 0
+        self.nbytes = 0
+        self.errors = 0
+        self.latencies: list[float] = []
+
+    def record_ok(self, rows: int, nbytes: int, latency: float) -> None:
+        with self._lock:
+            self.requests += 1
+            self.rows += rows
+            self.nbytes += nbytes
+            self.latencies.append(latency)
+            self.total_requests += 1
+            self.total_rows += rows
+            self.total_bytes += nbytes
+
+    def record_err(self, latency: float) -> None:
+        with self._lock:
+            self.errors += 1
+            self.latencies.append(latency)
+            self.total_errors += 1
+
+    def drain(self, dt: float) -> dict:
+        with self._lock:
+            requests, rows, nbytes, errors, latencies = (
+                self.requests,
+                self.rows,
+                self.nbytes,
+                self.errors,
+                sorted(self.latencies),
+            )
+            self._reset_interval()
+        return {
+            "rps": requests / dt if dt > 0 else 0.0,
+            "rows_s": rows / dt if dt > 0 else 0.0,
+            "mb_s": (nbytes / dt / 1e6) if dt > 0 else 0.0,
+            "err_rate": errors / max(requests + errors, 1),
+            "errors": errors,
+            "p50": percentile(latencies, 0.50),
+            "p95": percentile(latencies, 0.95),
+            "p99": percentile(latencies, 0.99),
+        }
+
+    def totals(self) -> dict:
+        with self._lock:
+            return {
+                "requests": self.total_requests,
+                "rows": self.total_rows,
+                "mb": self.total_bytes / 1e6,
+                "errors": self.total_errors,
+            }
+
+
+def percentile(sorted_values: list[float], q: float) -> float:
+    if not sorted_values:
+        return 0.0
+    return sorted_values[min(len(sorted_values) - 1, int(q * len(sorted_values)))]
+
+
+def fmt_ms(seconds: float) -> str:
+    return f"{seconds * 1000:.1f}ms"
+
+
+def print_load_line(elapsed: float, concurrency: int, rep: dict) -> None:
+    print(
+        f"[load] {elapsed:6.0f}s  conc={concurrency:3d}  {rep['rps']:9.1f} req/s  {rep['rows_s']:11.0f} rows/s  "
+        f"{rep['mb_s']:6.2f} MB/s  p50={fmt_ms(rep['p50']):>8}  p95={fmt_ms(rep['p95']):>8}  "
+        f"p99={fmt_ms(rep['p99']):>8}  err={rep['err_rate'] * 100:5.2f}%",
+        flush=True,
+    )
+
+
+async def read_status(reader: asyncio.StreamReader) -> int:
+    header = await reader.readuntil(b"\r\n\r\n")
+    lines = header.decode("latin1").split("\r\n")
+    status = int(lines[0].split(" ", 2)[1])
+    length = 0
+    chunked = False
+    for line in lines[1:]:
+        key, _, value = line.partition(":")
+        key = key.strip().lower()
+        value = value.strip()
+        if key == "content-length":
+            length = int(value)
+        elif key == "transfer-encoding" and "chunked" in value.lower():
+            chunked = True
+    if chunked:
+        while True:
+            size = int((await reader.readuntil(b"\r\n")).strip(), 16)
+            if size == 0:
+                await reader.readuntil(b"\r\n")
+                break
+            await reader.readexactly(size + 2)
+    elif length:
+        await reader.readexactly(length)
+    return status
+
+
+async def load_worker(
+    index: int,
+    gate: AsyncGate,
+    stop: asyncio.Event,
+    host: str,
+    port: int,
+    path: str,
+    host_header: str,
+    bodies: list[tuple[bytes, int]],
+    metrics: LoadMetrics,
+    timeout: float,
+    tls,
+) -> None:
+    rng = random.Random(index * 7919 + 13)
+    reader = writer = None
+    while not stop.is_set():
+        if not await gate.wait_turn(index):
+            return
+        if writer is None:
+            reader, writer = await asyncio.open_connection(host, port, ssl=tls)
+        body, rows = rng.choice(bodies)
+        request = (
+            f"POST {path} HTTP/1.1\r\nHost: {host_header}\r\nContent-Type: application/json\r\n"
+            f"Content-Length: {len(body)}\r\nConnection: keep-alive\r\n\r\n"
+        ).encode() + body
+        started = time.perf_counter()
+        try:
+            writer.write(request)
+            await writer.drain()
+            status = await asyncio.wait_for(read_status(reader), timeout)
+            latency = time.perf_counter() - started
+            if status == 202:
+                metrics.record_ok(rows, len(body), latency)
+            else:
+                metrics.record_err(latency)
+        except Exception:  # noqa: BLE001 - a load test keeps going through failures
+            metrics.record_err(time.perf_counter() - started)
+            if writer is not None:
+                try:
+                    writer.close()
+                except Exception:  # noqa: BLE001
+                    pass
+            reader = writer = None
+            await asyncio.sleep(0.05)
+    if writer is not None:
+        try:
+            writer.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+async def load_main(args: argparse.Namespace) -> int:
+    endpoint = args.url.rstrip("/") + "/api/ingest"
+    parsed = urllib.parse.urlsplit(endpoint)
+    path = parsed.path or "/"
+    if parsed.query:
+        path += "?" + parsed.query
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    host_header = parsed.netloc or host
+    tls = ssl.create_default_context() if parsed.scheme == "https" else None
+
+    rng = random.Random(args.seed)
+    bodies = build_load_bodies(rng, max(1, args.load_batch), max(1, args.load_bodies))
+
+    metrics = LoadMetrics()
+    gate = AsyncGate()
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except (NotImplementedError, RuntimeError):
+            pass
+
+    workers = [
+        asyncio.create_task(
+            load_worker(
+                index,
+                gate,
+                stop,
+                host,
+                port,
+                path,
+                host_header,
+                bodies,
+                metrics,
+                args.load_timeout,
+                tls,
+            )
+        )
+        for index in range(max(1, args.load_max))
+    ]
+
+    concurrency = max(1, args.load_start)
+    await gate.set_target(concurrency)
+    interval = args.load_interval
+    peak_rps = 0.0  # smoothed throughput at the best concurrency
+    peak_raw = 0.0  # best single-interval throughput, for the summary
+    best_concurrency = concurrency
+    ema = 0.0
+    plateau = 0
+    warmup = 1  # the first interval includes connection setup; do not trust it
+    phase = "ramp"
+    started = time.monotonic()
+    deadline = started + args.duration if args.duration else None
+
+    def ramp_up(current: int) -> int:
+        return min(args.load_max, max(current + 1, int(current * args.load_step)))
+
+    print(
+        f"[load] {endpoint}  batch={args.load_batch} rows  bodies={len(bodies)}  "
+        f"conc={args.load_start}..{args.load_max}  Ctrl-C to stop",
+        flush=True,
+    )
+
+    try:
+        while not stop.is_set():
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=interval)
+                break
+            except asyncio.TimeoutError:
+                pass
+            report = metrics.drain(interval)
+            print_load_line(time.monotonic() - started, concurrency, report)
+
+            peak_raw = max(peak_raw, report["rps"])
+            ema = report["rps"] if ema == 0.0 else 0.5 * report["rps"] + 0.5 * ema
+
+            if report["err_rate"] > args.load_error_threshold:
+                phase, plateau = "ramp", 0
+                concurrency = max(1, int(concurrency * 0.7))
+            elif warmup:
+                warmup -= 1
+                concurrency = ramp_up(concurrency)
+            elif phase == "ramp":
+                if ema > peak_rps * 1.05:
+                    peak_rps, best_concurrency, plateau = ema, concurrency, 0
+                    concurrency = ramp_up(concurrency)
+                else:
+                    plateau += 1
+                    if plateau >= args.load_plateau:
+                        phase = "hold"
+                        concurrency = best_concurrency
+                        print(
+                            f"[load] throughput plateaued; holding ~{peak_rps:.0f} req/s at conc {best_concurrency}",
+                            flush=True,
+                        )
+                    else:
+                        concurrency = ramp_up(concurrency)
+            await gate.set_target(concurrency)
+
+            if deadline and time.monotonic() >= deadline:
+                break
+    finally:
+        await gate.stop()
+        _, pending = await asyncio.wait(workers, timeout=2)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    totals = metrics.totals()
+    minutes = (time.monotonic() - started) / 60
+    errors = totals["errors"]
+    error_rate = errors / max(totals["requests"] + errors, 1) * 100
+    print(
+        f"[load] stopped after {minutes:.1f} min: sustained ~{peak_rps:.0f} req/s at conc {best_concurrency} "
+        f"(peak {peak_raw:.0f}); totals {totals['requests']} requests, {totals['rows']} rows, "
+        f"{totals['mb']:.1f} MB, {errors} errors ({error_rate:.3f}%)",
+        flush=True,
+    )
+    return 0
+
+
+def run_load(args: argparse.Namespace) -> int:
+    try:
+        return asyncio.run(load_main(args))
+    except KeyboardInterrupt:
+        return 130
+
+
 # --- entry point -------------------------------------------------------------
 
 
@@ -480,11 +835,41 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scale", type=float, default=None, help="cadence multiplier (0.1 = 10x faster)")
     parser.add_argument("--duration", type=float, default=0.0, help="stop after this many seconds (0 = forever)")
     parser.add_argument("--seed", type=int, default=None, help="seed the RNG for repeatable output")
+    parser.add_argument(
+        "--load",
+        action="store_true",
+        help="load-test mode: ramp concurrency until throughput plateaus, then hold",
+    )
+    parser.add_argument("--load-batch", type=int, default=200, help="rows per request in load mode")
+    parser.add_argument("--load-bodies", type=int, default=32, help="number of pre-generated request bodies")
+    parser.add_argument("--load-start", type=int, default=2, help="initial concurrency in load mode")
+    parser.add_argument("--load-max", type=int, default=128, help="maximum concurrency in load mode")
+    parser.add_argument("--load-step", type=float, default=1.5, help="concurrency multiplier per ramp step")
+    parser.add_argument("--load-interval", type=float, default=3.0, help="control and report interval, seconds")
+    parser.add_argument(
+        "--load-plateau",
+        type=int,
+        default=3,
+        help="non-improving intervals before load mode holds the sustained rate",
+    )
+    parser.add_argument(
+        "--load-error-threshold",
+        type=float,
+        default=0.02,
+        help="error rate that triggers backoff in load mode",
+    )
+    parser.add_argument("--load-timeout", type=float, default=30.0, help="per-request socket timeout, seconds")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    if args.load:
+        return run_load(args)
+    return run_realistic(args)
+
+
+def run_realistic(args: argparse.Namespace) -> int:
     scale = args.scale if args.scale is not None else (0.1 if args.fast else 1.0)
     endpoint = args.url.rstrip("/") + "/api/ingest"
 
