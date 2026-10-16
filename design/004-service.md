@@ -75,3 +75,12 @@ ever holds superseded files and is emptied after a grace period.
 
 TODO. A backup must snapshot the whole `data/` tree including `.staging/` and `.trash/`, or take the same lock the
 compaction swap takes, so a snapshot coincides with neither half of a swap.
+
+## Testing
+
+`mise run test` runs the hurl scenarios against a running service's read API (see `design/003-visualization.md`).
+`mise run test:ingest` (`tools/simulate_ingest.py`) keeps posting realistic data for every source until interrupted,
+which exercises the whole write path including tier compaction. It targets `ACTA_URL` (default the dev server on
+`127.0.0.1:8080`); `--fast` compresses the cadence and `--duration` bounds the run. To watch a clean dataset, point
+a service at a scratch `ACTA_DATA_DIR` or move `data/data.parquet` aside — the migration regenerates it from
+`traces.parquet`.

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#MISE description="Continuously send simulated readings for every data source to a running service"
+#USAGE flag "--fast" help="Run with a 10x faster cadence"
+#USAGE flag "--scale <scale>" help="Cadence multiplier (0.1 = 10x faster)"
+#USAGE flag "--duration <seconds>" help="Stop after this many seconds (0 = forever)"
+#USAGE flag "--seed <seed>" help="Seed the RNG for repeatable output"
+#USAGE flag "--url <url>" help="Base URL of a running service" env="ACTA_URL"
+set -euo pipefail
+
+exec python3 tools/simulate_ingest.py "$@"
