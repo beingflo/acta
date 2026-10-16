@@ -177,7 +177,30 @@ body.fullscreen-tile {
 }
 
 .tile-chart {
+  position: relative;
   width: 100%;
+}
+
+/* Loading indicator: a single hairline arc, grey on grey. Built imperatively
+   into the chart container (see TimeSeriesTile), so it sits above the canvas. */
+.chart-spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  border: 1.5px solid #e6e6e6;
+  border-top-color: #8f8f8f;
+  border-radius: 50%;
+  animation: chart-spin 0.7s linear infinite;
+}
+
+@keyframes chart-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Summary strip: the newest value of every chart on the dashboard, in a row

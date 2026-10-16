@@ -48,29 +48,47 @@ export default function TimeSeriesTile(props: {
   let chart: uPlot | undefined
   let requestId = 0
   const [width, setWidth] = createSignal(0)
+  const [loading, setLoading] = createSignal(false)
 
-  /**
-   * Hand the newest value of each series to the summary strip. Read from the
-   * plotted data, so the card always agrees with the right-hand end of the
-   * chart and costs no extra query.
-   */
-  const publish = (aligned: uPlot.AlignedData) => {
-    const columns = aligned.slice(1) as (number | null | undefined)[][]
+  /** Hand one card per series to the summary strip. */
+  const publish = (values: (number | null)[]) => {
     const unit = unitOf(props.yLabel)
     publishReadings(
       id,
       order,
-      props.series.map((_, index) => {
-        const values = columns[index] ?? []
-        for (let at = values.length - 1; at >= 0; at--) {
-          const value = values[at]
-          if (typeof value === 'number' && Number.isFinite(value)) {
-            return { title: props.title, unit, value }
-          }
-        }
-        return { title: props.title, unit, value: null }
-      }),
+      props.series.map((_, index) => ({ title: props.title, unit, value: values[index] ?? null })),
     )
+  }
+
+  /**
+   * Newest value of every series in the plotted data, so the card always agrees
+   * with the right-hand end of the chart and costs no extra query.
+   */
+  const newestValues = (aligned: uPlot.AlignedData): (number | null)[] => {
+    const columns = aligned.slice(1) as (number | null | undefined)[][]
+    return props.series.map((_, index) => {
+      const points = columns[index] ?? []
+      for (let at = points.length - 1; at >= 0; at--) {
+        const value = points[at]
+        if (typeof value === 'number' && Number.isFinite(value)) return value
+      }
+      return null
+    })
+  }
+
+  // Built imperatively, like the tooltip and for the same underlying reason:
+  // uPlot owns everything inside `container`, and Solid clears the children of
+  // an element it manages. A conditional child here is compiled to a
+  // markerless insert, whose cleanup is `parent.textContent = ""` — which took
+  // uPlot's canvas with it.
+  let spinner: HTMLDivElement | undefined
+
+  const buildSpinner = (host: HTMLElement) => {
+    const element = document.createElement('div')
+    element.className = 'chart-spinner'
+    element.style.display = 'none'
+    host.append(element)
+    return element
   }
 
   // The tooltip lives inside uPlot's `.u-over` element, which is the coordinate
@@ -205,7 +223,8 @@ export default function TimeSeriesTile(props: {
     },
   })
 
-  const load = async () => {
+  /** `background` is the periodic refresh, which must not flash the spinner. */
+  const load = async (background = false) => {
     const chartWidth = width()
     if (!chartWidth || !chart) return
 
@@ -219,18 +238,25 @@ export default function TimeSeriesTile(props: {
     })
 
     const request = ++requestId
+    if (!background) setLoading(true)
     try {
       const rows = await fetchData<Array<Record<string, number | string>>>(sql)
       if (request !== requestId || !chart) return
       const aligned = toAligned(rows ?? [], props.series.length)
       chart.setData(aligned)
-      publish(aligned)
+      publish(newestValues(aligned))
     } catch (error) {
       if (request === requestId) console.error(`tile "${props.title}" query failed`, error)
+    } finally {
+      if (request === requestId) setLoading(false)
     }
   }
 
   onMount(() => {
+    // Reserve the summary cards before the first query comes back, so the strip
+    // appears at its final size (values reading `—`) instead of growing.
+    publish(props.series.map(() => null))
+
     const observer = new ResizeObserver((entries) => {
       const next = Math.floor(entries[0].contentRect.width)
       if (next > 0) setWidth(next)
@@ -243,7 +269,7 @@ export default function TimeSeriesTile(props: {
     let timer = 0
     const schedule = () => {
       timer = window.setTimeout(async () => {
-        await load()
+        await load(true)
         schedule()
       }, REFRESH_MS + Math.random() * JITTER_MS)
     }
@@ -256,6 +282,7 @@ export default function TimeSeriesTile(props: {
       chart?.destroy()
       chart = undefined
       clearReadings(id)
+      spinner = undefined
       tooltip = undefined
       tooltipTime = undefined
       tooltipValues = []
@@ -270,8 +297,18 @@ export default function TimeSeriesTile(props: {
     if (!chart) {
       chart = new uPlot(options(chartWidth), [[], ...props.series.map(() => [])], container)
       buildTooltip(chart.over)
+      spinner = buildSpinner(container)
     }
     void load()
+  })
+
+  // Only a first load or a range change raises `loading`; the background refresh
+  // leaves it alone, so this never flickers on the 30s tick. `loading()` is read
+  // before the guard on purpose: behind it the effect would subscribe to nothing
+  // and never re-run.
+  createEffect(() => {
+    const show = loading()
+    if (spinner) spinner.style.display = show ? '' : 'none'
   })
 
   // Keep the plot matched to the tile, including when it goes fullscreen.
@@ -294,10 +331,12 @@ export default function TimeSeriesTile(props: {
           ×
         </button>
       </Show>
-        <div class="tile-body">
-          {props.yLabel && <div class="tile-ylabel">↑ {props.yLabel}</div>}
-          <div class="tile-chart" ref={container} />
-        </div>
+      <div class="tile-body">
+        {props.yLabel && <div class="tile-ylabel">↑ {props.yLabel}</div>}
+        {/* Height is set up front so the tile does not grow when uPlot lands.
+            Deliberately childless: uPlot owns this element. */}
+        <div class="tile-chart" ref={container} style={{ height: `${height()}px` }} />
+      </div>
     </section>
   )
 }

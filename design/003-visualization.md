@@ -126,6 +126,10 @@ vertical line with their tooltip pinned to the top of the plot, and a horizontal
 A maximized tile is the only chart on screen, so it is the only one that takes part in that sharing.
 Dragging horizontally selects a custom range; a short drag is ignored, so it still reads as a click.
 
+Chart areas and summary cards are sized before the first query returns, and a tile whose query is in flight shows a
+small spinner, so nothing shifts when the data lands. The periodic refresh is silent — only a range change or a first
+load shows the spinner.
+
 ## Date range picker
 
 A fixed date range picker is always visible on the top right as a list of buttons: `all 2y 1y 6m 30d 7d 1d 6h C`
