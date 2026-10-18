@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+#MISE description="Copy tiles/*.pmtiles to the server (read-only bind mount)"
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$root"
+if [[ -f .env.deploy ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env.deploy
+    set +a
+fi
+
+host="${ACTA_HOST:-eos}"
+
+die() { echo "error: $*" >&2; exit 1; }
+note() { echo "==> $*"; }
+
+[[ -d tiles ]] || die "tiles/ not found"
+note "copying tiles/*.pmtiles to ${host}:acta/tiles"
+ssh "$host" 'mkdir -p "$HOME/acta/tiles"'
+rsync -av --include='*.pmtiles' --exclude='*' tiles/ "${host}:acta/tiles/"

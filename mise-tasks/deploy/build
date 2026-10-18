@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+#MISE description="Build the container image locally (no shipping or restart)"
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$root"
+if [[ -f .env.deploy ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env.deploy
+    set +a
+fi
+
+die() { echo "error: $*" >&2; exit 1; }
+note() { echo "==> $*"; }
+
+command -v podman >/dev/null || die "podman not found"
+podman info >/dev/null 2>&1 || die "podman machine is not running"
+
+tag="$(date +%Y%m%d-%H%M%S)-$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
+note "building localhost/acta:${tag}"
+podman build -t "localhost/acta:${tag}" .
+note "built localhost/acta:${tag}"

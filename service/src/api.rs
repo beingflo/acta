@@ -6,7 +6,7 @@ use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::{Json, Router, middleware};
 use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::RwLock;
@@ -15,6 +15,7 @@ use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
 
+use crate::auth::{self, Auth};
 use crate::db::{Db, QueryError};
 use crate::ingest::{self, IngestHandle, IngestItem};
 
@@ -29,7 +30,7 @@ pub struct AppState {
     pub ingest_max_body_bytes: usize,
 }
 
-pub fn router(state: AppState, ui_dir: PathBuf, tiles_dir: PathBuf) -> Router {
+pub fn router(state: AppState, ui_dir: PathBuf, tiles_dir: PathBuf, auth: Auth) -> Router {
     let index = ui_dir.join("index.html");
     let spa = ServeDir::new(ui_dir).fallback(ServeFile::new(index));
     let body_limit = state.ingest_max_body_bytes;
@@ -52,8 +53,9 @@ pub fn router(state: AppState, ui_dir: PathBuf, tiles_dir: PathBuf) -> Router {
         ))
         .service(ServeDir::new(tiles_dir));
 
-    Router::new()
-        .route("/healthz", get(healthz))
+    // Everything below the health check is protected; `/health` stays public
+    // so the deploy script and systemd can probe a host without credentials.
+    let protected = Router::new()
         .route("/api/data", post(data))
         .route(
             "/api/ingest",
@@ -61,12 +63,63 @@ pub fn router(state: AppState, ui_dir: PathBuf, tiles_dir: PathBuf) -> Router {
         )
         .nest_service("/tiles", tiles)
         .fallback_service(spa)
+        .layer(middleware::from_fn_with_state(auth, auth::authorize));
+
+    Router::new()
+        .route("/health", get(health))
+        .merge(protected)
         .layer(CatchPanicLayer::new())
         .with_state(state)
 }
 
-async fn healthz() -> &'static str {
-    "ok"
+/// The sensor whose freshness defines liveness, and how old its newest reading
+/// may be before the service is considered unhealthy.
+const HEALTH_SOURCE: &str = "co2-sensor-living-room";
+const HEALTH_MAX_AGE_MINUTES: i64 = 10;
+
+/// Liveness and freshness: 200 only when a reading from `HEALTH_SOURCE` arrived
+/// within the last `HEALTH_MAX_AGE_MINUTES`, 503 otherwise. A running process
+/// with a dead sensor upstream reports unhealthy.
+async fn health(State(state): State<AppState>) -> Response {
+    let cutoff = (chrono::Utc::now() - chrono::Duration::minutes(HEALTH_MAX_AGE_MINUTES))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    // The window lets file and row-group statistics prune the archive, so this
+    // only touches the live end of the data rather than scanning every file.
+    let sql = format!(
+        "SELECT to_json(struct_pack(newest := CAST(epoch(CAST(max(timestamp) AS TIMESTAMP)) AS BIGINT)))::VARCHAR \
+         FROM events \
+         WHERE source = '{HEALTH_SOURCE}' AND timestamp >= TIMESTAMPTZ '{cutoff}'"
+    );
+
+    match state.db.query_json(sql).await {
+        Ok(json) => {
+            let newest = serde_json::from_str::<serde_json::Value>(&json)
+                .ok()
+                .and_then(|value| value.get("newest").and_then(serde_json::Value::as_i64));
+            match newest {
+                Some(secs) => {
+                    let age = chrono::Utc::now().timestamp() - secs;
+                    (
+                        StatusCode::OK,
+                        format!("ok: newest {HEALTH_SOURCE} reading is {age}s old\n"),
+                    )
+                        .into_response()
+                }
+                None => (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    format!(
+                        "stale: no {HEALTH_SOURCE} reading in the last {HEALTH_MAX_AGE_MINUTES} minutes\n"
+                    ),
+                )
+                    .into_response(),
+            }
+        }
+        Err(err) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("unavailable: {err}\n"),
+        )
+            .into_response(),
+    }
 }
 
 #[derive(Deserialize)]

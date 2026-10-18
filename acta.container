@@ -1,0 +1,33 @@
+[Unit]
+Description=acta data collection service
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+Image=localhost/acta:__TAG__
+PublishPort=127.0.0.1:8080:8080
+
+# Data lives in a named volume; tiles are read-only and regenerated on the
+# host. Non-secret configuration is in the env file; credentials are podman
+# secrets so they never appear in the unit or its environment dump.
+Volume=acta-data:/data
+Volume=%h/acta/tiles:/usr/src/app/tiles:ro,Z
+EnvironmentFile=%h/.config/acta/acta.env
+Environment=TZ=UTC
+Environment=RUST_LOG=info
+
+Secret=acta-auth-ui-password,type=env,target=ACTA_AUTH_UI_PASSWORD
+Secret=acta-auth-sensor-password,type=env,target=ACTA_AUTH_SENSOR_PASSWORD
+Secret=acta-aws-key-id,type=env,target=AWS_ACCESS_KEY_ID
+Secret=acta-aws-secret,type=env,target=AWS_SECRET_ACCESS_KEY
+
+[Service]
+Restart=on-failure
+RestartSec=5
+# The service flushes the ingest buffer on SIGTERM; give it more than its own
+# 15 s shutdown timeout.
+TimeoutStopSec=30
+MemoryMax=3G
+
+[Install]
+WantedBy=default.target

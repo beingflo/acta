@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+#MISE description="Stop acta, restore the backup from S3, and start it again"
+#USAGE flag "--force" help="overwrite files that already exist"
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$root"
+if [[ -f .env.deploy ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env.deploy
+    set +a
+fi
+
+host="${ACTA_HOST:-eos}"
+s3_bucket="${ACTA_S3_BUCKET:-}"
+
+die() { echo "error: $*" >&2; exit 1; }
+
+[[ -n "$s3_bucket" ]] || die "ACTA_S3_BUCKET is empty; nothing to restore from"
+ssh "$host" bash -s -- "$@" <<'EOF'
+set -euo pipefail
+systemctl --user stop acta >/dev/null 2>&1 || true
+podman image exists localhost/acta:current || { echo "no localhost/acta:current image"; exit 1; }
+podman run --rm \
+    -v acta-data:/data \
+    --env-file "$HOME/.config/acta/acta.env" \
+    --secret acta-auth-ui-password,type=env,target=ACTA_AUTH_UI_PASSWORD \
+    --secret acta-auth-sensor-password,type=env,target=ACTA_AUTH_SENSOR_PASSWORD \
+    --secret acta-aws-key-id,type=env,target=AWS_ACCESS_KEY_ID \
+    --secret acta-aws-secret,type=env,target=AWS_SECRET_ACCESS_KEY \
+    localhost/acta:current restore "$@"
+systemctl --user start acta
+EOF

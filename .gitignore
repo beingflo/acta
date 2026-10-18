@@ -12,3 +12,7 @@ __pycache__/
 # Map tiles
 *.pmtiles
 tiles/regions/
+
+# Deployment config/secrets
+.env
+.env.deploy

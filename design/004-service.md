@@ -24,6 +24,21 @@ See
 
 ## Auth
 
+Two HTTP basic credentials are configured through podman secrets. The UI credential guards the dashboard, the read
+API and the tile archives; the sensor credential may only `POST /api/ingest`, so a sensor password can be rotated
+without touching the dashboard. `/health` stays public for the deploy script and any external probe. An
+unauthenticated request gets `401` with `WWW-Authenticate`, so a browser prompts once and then attaches the header to
+the same-origin `/api/data` and `/tiles/*` requests. With no UI credential configured, authentication is off, which is
+what the local dev server relies on. Passwords are compared in constant time and never logged.
+
+## Health
+
+`GET /health` returns `200` only when the newest `co2-sensor-living-room` row is at most ten minutes old, and `503`
+otherwise (no reading in the window, or the query failed). The co2 sensor reports every ~20 s, so ten minutes is
+generous; a service that is running but has stopped receiving data reports unhealthy. The check queries the read
+path with an explicit ten-minute window, so file and row-group statistics prune the archive and only the live end
+is touched.
+
 ## Data ingestion
 
 `POST /api/ingest` takes a JSON array of `{ source, timestamp?, data }`. `source` names the data source, `data` is
@@ -80,15 +95,52 @@ ever holds superseded files; it is swept periodically and anything younger than 
 
 ## Backup
 
-TODO. A backup must snapshot the whole `data/` tree including `.staging/` and `.trash/`, or take the same lock the
-compaction swap takes, so a snapshot coincides with neither half of a swap.
+Once at startup and daily at `ACTA_BACKUP_HOUR_UTC` (03:00 UTC by default), the service uploads every completed tier
+file (the `day-` and `month-` files) plus any archive file at the top level, such as the migration's `data.parquet`.
+Hot, recent and hour files are skipped: they are superseded within the day and would only add short-lived objects.
+Nothing is ever deleted, and a name is uploaded once, so no bug can destroy the backup. Only completed tiers are
+uploaded, so at most the current day is at risk, and a missed pass is caught up by the next one (the scan uploads
+whatever eligible files are present). Day files of a month that has already folded into a `month-` file may never
+have been uploaded if the service was down for the whole month; the month file covers those rows.
+
+The bucket holds the file names verbatim under an optional `ACTA_S3_PREFIX`. Restore (`acta restore`, run as a
+one-shot container with the data volume mounted, see `mise run deploy:restore`) downloads every object. A restore
+can contain both a finer tier and the coarser file that superseded it; the first compaction pass after startup
+reconciles them with the existing "target exists, so trash the inputs" rule, so duplicates are harmless.
+
+Credentials come from `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (podman secrets); bucket, region, endpoint and
+prefix from the environment. Uploads run in their own task and never block ingestion or compaction; a failed pass
+only logs a warning and is retried on the next one.
+
+## Deployment
+
+The service runs from a container on the server (Podman with Quadlet) and is fronted by Caddy at
+`acta.marending.dev`. `mise run deploy` builds the image locally, so the expensive bundled-DuckDB compile stays
+cached, ships it over ssh and restarts the unit. `mise run deploy:build` does the build alone, without shipping or
+restarting. `Containerfile`, `.containerignore` and `acta.container` hold the details. The first bundled-DuckDB
+compile wants roughly 8 CPUs and 12 GiB in the podman machine; afterwards the cargo target and npm caches reduce an
+ordinary change to a few seconds.
+
+State lives in three places, none of which a deploy touches:
+
+- `acta-data` (named volume) at `/data` — the Parquet tree, owned by podman and never a bind mount.
+- `~/acta/tiles` — the PMTiles archives, mounted read-only. Regenerated on the host and copied with
+  `mise run deploy:tiles`; the container never writes there.
+- `~/.config/acta/acta.env` — non-secret configuration (memory limit, backup schedule, S3 endpoint, usernames), plus
+  the podman secrets `acta-auth-ui-password`, `acta-auth-sensor-password`, `acta-aws-key-id` and `acta-aws-secret`,
+  installed with `mise run deploy:secrets`.
+
+`mise run deploy:seed <dir>` imports a fresh dataset into an empty volume and `mise run deploy:restore` recovers one
+from S3. Only one container may use the data volume at a time: the service assumes it owns the tree, including
+`.staging/` and `.trash/`.
 
 ## Testing
 
 `mise run test` runs the hurl scenarios against a running service's read API (see `design/003-visualization.md`).
 `mise run test:ingest` (`tools/simulate_ingest.py`) keeps posting realistic data for every source until interrupted,
 which exercises the whole write path including tier compaction. It targets `ACTA_URL` (default the dev server on
-`127.0.0.1:8080`); `--fast` compresses the cadence and `--duration` bounds the run. `--load` switches to load-test
+`127.0.0.1:8080`); set `ACTA_AUTH=user:pass` when the target has authentication enabled. `--fast` compresses the
+cadence and `--duration` bounds the run. `--load` switches to load-test
 mode: it ramps concurrent connections until throughput plateaus or errors rise, then holds, reporting requests/s,
 rows/s and latency percentiles. To test with a clean dataset, point a service at a scratch `ACTA_DATA_DIR` or move
 `data/data.parquet` aside — the migration regenerates it from `traces.parquet`.

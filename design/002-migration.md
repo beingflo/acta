@@ -90,10 +90,22 @@ Their payload shapes:
 
 ## Output layout
 
-Partial results are written to `migration/out/<source>.parquet` and combined into a single `data/data.parquet`, sorted
-by source and then timestamp, with 250k-row row groups. This file is the starting point of the dataset; the ingestion
-path (`design/004-service.md`) adds further files to the same directory, and the read path unions all of them. The
-source-major ordering below is a property of each file, not of the directory as a whole.
+Partial results are written to `migration/out/<source>.parquet`. They are then re-split into the same tier files the
+live write path produces, using the event time as the arrival time: `month-YYYY-MM` for closed months,
+`day-YYYY-MM-DD` for closed days in the open month, `hour-<epoch_s>` for closed hours in the open day, and
+`recent-`/`hot-` for the tail. Bucket boundaries are UTC, and the sort, compression and 250k-row row groups are
+identical to live files. The migrated files are therefore indistinguishable from files written by the service, and
+the read path simply unions everything in `data/`.
+
+The output must obey the live invariants exactly:
+
+- every tier covers a disjoint span, so each row lives in exactly one file;
+- never emit a coarser file for a span that is not fully closed. Compaction treats an existing coarser target as
+  authoritative and trashes the finer files in that span, so a partial `month-` or `day-` from the migration would
+  make the next pass discard newly ingested rows for the same period.
+
+The current script still writes a single `data/data.parquet`; the tiered output is the intended replacement. Until
+then that file sits outside the tier names, is ignored by compaction and anchors the dataset.
 
 Sorting by source first is what makes reads fast. Row-group statistics on `source` let a `source = ...` filter skip
 every other source's row groups, and keeping a source's rows contiguous keeps the Variant layout homogeneous within a

@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::auth::{Auth, Credential};
 use crate::db::DbOptions;
 
 /// Runtime configuration, all overridable via environment variables.
@@ -12,6 +13,8 @@ pub struct Settings {
     pub tiles_dir: PathBuf,
     pub db: DbOptions,
     pub write: WriteOptions,
+    pub auth: Auth,
+    pub backup: BackupOptions,
 }
 
 /// Write path configuration.
@@ -28,6 +31,20 @@ pub struct WriteOptions {
     pub trash_gc_interval: Duration,
     pub ingest_max_body_bytes: usize,
     pub ingest_max_batch: usize,
+}
+
+/// Daily S3 backup configuration. Credentials are read from the standard
+/// `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` variables and are deliberately
+/// not stored here, so this struct is safe to log.
+#[derive(Clone, Debug)]
+pub struct BackupOptions {
+    pub enabled: bool,
+    pub bucket: String,
+    pub region: String,
+    pub endpoint: Option<String>,
+    pub prefix: String,
+    pub hour_utc: u32,
+    pub allow_http: bool,
 }
 
 impl Settings {
@@ -71,14 +88,80 @@ impl Settings {
             ingest_max_batch: env_parse("ACTA_INGEST_MAX_BATCH", 10_000)?,
         };
 
+        let auth = parse_auth()?;
+        let backup = parse_backup()?;
+
         Ok(Self {
             addr,
             ui_dir,
             tiles_dir,
             db,
             write,
+            auth,
+            backup,
         })
     }
+}
+
+/// The UI credential enables authentication. The sensor credential is optional
+/// and, if present, may only reach `POST /api/ingest`.
+fn parse_auth() -> Result<Auth, String> {
+    let ui = credential("ACTA_AUTH_UI_USER", "ACTA_AUTH_UI_PASSWORD")?;
+    let sensor = credential("ACTA_AUTH_SENSOR_USER", "ACTA_AUTH_SENSOR_PASSWORD")?;
+    if ui.is_none() && sensor.is_some() {
+        return Err(
+            "ACTA_AUTH_SENSOR_* is set without ACTA_AUTH_UI_*; refusing to leave the UI open".into(),
+        );
+    }
+    Ok(Auth { ui, sensor })
+}
+
+fn credential(user_key: &str, password_key: &str) -> Result<Option<Credential>, String> {
+    match (std::env::var(user_key).ok(), std::env::var(password_key).ok()) {
+        (None, None) => Ok(None),
+        (Some(user), Some(password)) if !user.is_empty() && !password.is_empty() => {
+            Ok(Some(Credential { user, password }))
+        }
+        _ => Err(format!(
+            "{user_key} and {password_key} must both be set and non-empty"
+        )),
+    }
+}
+
+fn parse_backup() -> Result<BackupOptions, String> {
+    let enabled = env_bool("ACTA_BACKUP", false)?;
+    let bucket = env_str("ACTA_S3_BUCKET", "");
+    let region = env_str("ACTA_S3_REGION", "us-east-1");
+    let endpoint = std::env::var("ACTA_S3_ENDPOINT")
+        .ok()
+        .filter(|value| !value.is_empty());
+    let prefix = env_str("ACTA_S3_PREFIX", "");
+    let hour_utc = env_parse("ACTA_BACKUP_HOUR_UTC", 3u32)?;
+    let allow_http = env_bool("ACTA_S3_ALLOW_HTTP", false)?;
+
+    if hour_utc > 23 {
+        return Err("ACTA_BACKUP_HOUR_UTC must be between 0 and 23".into());
+    }
+    if enabled {
+        if bucket.is_empty() {
+            return Err("ACTA_BACKUP is on but ACTA_S3_BUCKET is empty".into());
+        }
+        for key in ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"] {
+            if std::env::var(key).is_err() {
+                return Err(format!("ACTA_BACKUP is on but {key} is not set"));
+            }
+        }
+    }
+
+    Ok(BackupOptions {
+        enabled,
+        bucket,
+        region,
+        endpoint,
+        prefix,
+        hour_utc,
+        allow_http,
+    })
 }
 
 fn env_str(key: &str, default: &str) -> String {
@@ -91,6 +174,17 @@ where
 {
     match std::env::var(key) {
         Ok(v) => v.parse().map_err(|e| format!("{key}: {e}")),
+        Err(_) => Ok(default),
+    }
+}
+
+fn env_bool(key: &str, default: bool) -> Result<bool, String> {
+    match std::env::var(key) {
+        Ok(value) => match value.as_str() {
+            "1" | "true" | "on" | "yes" => Ok(true),
+            "0" | "false" | "off" | "no" => Ok(false),
+            other => Err(format!("{key}: expected a boolean, got {other:?}")),
+        },
         Err(_) => Ok(default),
     }
 }

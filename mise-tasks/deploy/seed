@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+#MISE description="Import a directory of *.parquet files into a fresh acta-data volume"
+#USAGE arg "<dir>" help="directory containing the *.parquet files"
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$root"
+if [[ -f .env.deploy ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env.deploy
+    set +a
+fi
+
+host="${ACTA_HOST:-eos}"
+dir="${1:-}"
+
+die() { echo "error: $*" >&2; exit 1; }
+note() { echo "==> $*"; }
+
+[[ -n "$dir" && -d "$dir" ]] || die "usage: mise run deploy:seed -- <directory with *.parquet>"
+count="$(find "$dir" -maxdepth 1 -name '*.parquet' | wc -l | tr -d ' ')"
+[[ "$count" -gt 0 ]] || die "no *.parquet files in ${dir}"
+
+note "stopping acta and importing ${count} files into acta-data"
+echo "    (the volume must be empty; existing files with the same name are overwritten)"
+ssh "$host" 'podman volume create acta-data >/dev/null 2>&1 || true; systemctl --user stop acta >/dev/null 2>&1 || true'
+( cd "$dir" && tar -cf - -- *.parquet ) | ssh "$host" 'podman volume import acta-data -'
+ssh "$host" 'systemctl --user start acta'
+note "seeded"

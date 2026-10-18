@@ -43,6 +43,11 @@ enough to shred and lets row-group statistics skip other sources. All data is re
 Acta is a single binary consisting of the Rust backend that serves the API as well as the bundled frontend.
 The install artifact is a container that runs on the server using Podman and Quadlet.
 
+The Parquet tree lives in a named podman volume mounted at `/data`; the PMTiles archives are a read-only bind mount.
+Caddy terminates TLS and proxies `acta.marending.dev` to the container's loopback port. The service backs the data up
+daily itself — the completed day and month files are uploaded to S3, append-only — so no external cron or backup tool
+is involved. See `design/004-service.md` for the deployment and backup details.
+
 ## Further reading
 
 Migration: `design/002-migration.md`

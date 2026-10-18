@@ -5,6 +5,7 @@
 #USAGE flag "--duration <seconds>" help="Stop after this many seconds (0 = forever)"
 #USAGE flag "--seed <seed>" help="Seed the RNG for repeatable output"
 #USAGE flag "--url <url>" help="Base URL of a running service" env="ACTA_URL"
+#USAGE flag "--auth <user:pass>" help="HTTP basic auth credentials" env="ACTA_AUTH"
 #USAGE flag "--load" help="Load-test mode: ramp concurrency until throughput plateaus"
 #USAGE flag "--load-batch <rows>" help="Rows per request in load mode"
 #USAGE flag "--load-bodies <n>" help="Pre-generated request bodies in load mode"

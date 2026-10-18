@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+#MISE description="Build, ship and deploy acta (run deploy:secrets first)"
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$root"
+if [[ -f .env.deploy ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env.deploy
+    set +a
+fi
+
+host="${ACTA_HOST:-eos}"
+s3_bucket="${ACTA_S3_BUCKET:-}"
+s3_region="${ACTA_S3_REGION:-us-east-1}"
+s3_endpoint="${ACTA_S3_ENDPOINT:-}"
+s3_prefix="${ACTA_S3_PREFIX:-}"
+backup_hour_utc="${ACTA_BACKUP_HOUR_UTC:-3}"
+ui_user="${ACTA_AUTH_UI_USER:-flo}"
+sensor_user="${ACTA_AUTH_SENSOR_USER:-sensors}"
+memory_limit="${ACTA_MEMORY_LIMIT:-512MB}"
+ingest_backlog="${ACTA_INGEST_BACKLOG:-64}"
+
+die() { echo "error: $*" >&2; exit 1; }
+note() { echo "==> $*"; }
+
+require_secret() {
+    ssh "$host" "podman secret exists $1" >/dev/null 2>&1 \
+        || die "podman secret $1 is missing; run: mise run deploy:secrets"
+}
+
+command -v podman >/dev/null || die "podman not found"
+podman info >/dev/null 2>&1 || die "podman machine is not running"
+
+require_secret acta-auth-ui-password
+require_secret acta-auth-sensor-password
+if [[ -n "$s3_bucket" ]]; then
+    require_secret acta-aws-key-id
+    require_secret acta-aws-secret
+fi
+
+tag="$(date +%Y%m%d-%H%M%S)-$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
+image="localhost/acta:${tag}"
+
+note "building ${image}"
+podman build -t "$image" .
+
+note "shipping ${image} to ${host}"
+podman save "$image" | zstd -q -T0 | ssh "$host" 'zstd -q -d | podman load'
+ssh "$host" "podman tag ${image} localhost/acta:current"
+
+backup="off"
+if [[ -n "$s3_bucket" ]]; then
+    backup="on"
+fi
+
+note "writing ~/.config/acta/acta.env on ${host}"
+ssh "$host" 'mkdir -p "$HOME/.config/acta" && umask 077 && cat > "$HOME/.config/acta/acta.env"' <<EOF
+ACTA_ADDR=0.0.0.0:8080
+ACTA_DATA_DIR=/data
+ACTA_UI_DIR=/usr/src/app/ui/dist
+ACTA_TILES_DIR=/usr/src/app/tiles
+ACTA_MEMORY_LIMIT=${memory_limit}
+ACTA_INGEST_BACKLOG=${ingest_backlog}
+ACTA_BACKUP=${backup}
+ACTA_BACKUP_HOUR_UTC=${backup_hour_utc}
+ACTA_S3_BUCKET=${s3_bucket}
+ACTA_S3_REGION=${s3_region}
+ACTA_S3_ENDPOINT=${s3_endpoint}
+ACTA_S3_PREFIX=${s3_prefix}
+ACTA_AUTH_UI_USER=${ui_user}
+ACTA_AUTH_SENSOR_USER=${sensor_user}
+EOF
+
+note "installing acta.container (${tag})"
+if [[ -n "$s3_bucket" ]]; then
+    sed "s|__TAG__|${tag}|g" acta.container
+else
+    sed -e "s|__TAG__|${tag}|g" -e '/type=env,target=AWS_/d' acta.container
+fi | ssh "$host" 'mkdir -p "$HOME/.config/containers/systemd" && cat > "$HOME/.config/containers/systemd/acta.container"'
+
+note "restarting"
+ssh "$host" 'systemctl --user daemon-reload && systemctl --user restart acta'
+
+note "health check"
+if ssh "$host" 'curl -sf --max-time 15 -o /dev/null http://127.0.0.1:8080/health'; then
+    echo "ok"
+else
+    echo "WARN: /health is not ok (no co2 reading in the last 10 minutes, or the query failed)"
+    ssh "$host" 'curl -s --max-time 15 http://127.0.0.1:8080/health; echo' || true
+    echo "logs: ssh ${host} journalctl --user -u acta -n 50"
+fi
+
+note "pruning old images (keeping 5)"
+ssh "$host" 'podman images --format "{{.Repository}}:{{.Tag}}" \
+    | grep -E "^localhost/acta:" | grep -v ":current$" | sort \
+    | head -n -5 | xargs -r podman rmi >/dev/null 2>&1 || true'
+
+note "deployed ${image}"

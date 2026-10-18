@@ -1,0 +1,25 @@
+# Keep large, generated and machine-local files out of the build context.
+# Without this the context is over a gigabyte (`traces.parquet` alone is 1.1 GB).
+.git
+.jj
+.DS_Store
+
+# Data and migration inputs/outputs
+data/
+data.parquet
+traces.parquet
+migration/out/
+migration/.venv/
+**/__pycache__/
+
+# Map archives are a runtime bind mount, not part of the image
+tiles/
+
+# Build output and dependencies
+service/target/
+ui/node_modules/
+ui/dist/
+
+# Local deployment config (if present)
+.env
+.env.deploy

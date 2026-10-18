@@ -9,6 +9,7 @@ files (and a day or more for daily files).
 
     mise run test:ingest
     ACTA_URL=http://host:8080 mise run test:ingest
+    ACTA_URL=https://acta.example ACTA_AUTH=user:pass mise run test:ingest
     mise run test:ingest --fast              # 10x faster cadence
     mise run test:ingest --duration 120      # stop after two minutes
 
@@ -27,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import json
 import math
 import os
@@ -415,10 +417,13 @@ def send(endpoint: str, items: list[dict], stats: Stats, source: str) -> None:
     if not items:
         return
     body = json.dumps(items).encode()
+    headers = {"Content-Type": "application/json"}
+    if _AUTH:
+        headers["Authorization"] = _AUTH
     request = urllib.request.Request(
         endpoint,
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     try:
@@ -434,6 +439,18 @@ def send(endpoint: str, items: list[dict], stats: Stats, source: str) -> None:
 
 
 _last_warning = 0.0
+
+# Set from `--auth`/`ACTA_AUTH`; empty when the service has authentication off.
+_AUTH = ""
+
+
+def basic_auth(value: str | None) -> str:
+    """Return an `Authorization` header value for `user:password`."""
+    if not value:
+        return ""
+    if ":" not in value:
+        raise SystemExit("--auth must be user:password")
+    return "Basic " + base64.b64encode(value.encode()).decode()
 
 
 def run_source(
@@ -636,6 +653,7 @@ async def load_worker(
     port: int,
     path: str,
     host_header: str,
+    authorization: str,
     bodies: list[tuple[bytes, int]],
     metrics: LoadMetrics,
     timeout: float,
@@ -649,9 +667,10 @@ async def load_worker(
         if writer is None:
             reader, writer = await asyncio.open_connection(host, port, ssl=tls)
         body, rows = rng.choice(bodies)
+        auth_line = f"Authorization: {authorization}\r\n" if authorization else ""
         request = (
             f"POST {path} HTTP/1.1\r\nHost: {host_header}\r\nContent-Type: application/json\r\n"
-            f"Content-Length: {len(body)}\r\nConnection: keep-alive\r\n\r\n"
+            f"{auth_line}Content-Length: {len(body)}\r\nConnection: keep-alive\r\n\r\n"
         ).encode() + body
         started = time.perf_counter()
         try:
@@ -713,6 +732,7 @@ async def load_main(args: argparse.Namespace) -> int:
                 port,
                 path,
                 host_header,
+                basic_auth(args.auth),
                 bodies,
                 metrics,
                 args.load_timeout,
@@ -836,6 +856,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--duration", type=float, default=0.0, help="stop after this many seconds (0 = forever)")
     parser.add_argument("--seed", type=int, default=None, help="seed the RNG for repeatable output")
     parser.add_argument(
+        "--auth",
+        default=os.environ.get("ACTA_AUTH", ""),
+        help="HTTP basic auth as user:password (default: ACTA_AUTH)",
+    )
+    parser.add_argument(
         "--load",
         action="store_true",
         help="load-test mode: ramp concurrency until throughput plateaus, then hold",
@@ -870,6 +895,8 @@ def main() -> int:
 
 
 def run_realistic(args: argparse.Namespace) -> int:
+    global _AUTH
+    _AUTH = basic_auth(args.auth)
     scale = args.scale if args.scale is not None else (0.1 if args.fast else 1.0)
     endpoint = args.url.rstrip("/") + "/api/ingest"
 
