@@ -14,21 +14,43 @@ fi
 
 host="${ACTA_HOST:-eos}"
 s3_bucket="${ACTA_S3_BUCKET:-}"
+s3_region="${ACTA_S3_REGION:-us-east-1}"
+s3_endpoint="${ACTA_S3_ENDPOINT:-}"
+s3_prefix="${ACTA_S3_PREFIX:-}"
+s3_allow_http="${ACTA_S3_ALLOW_HTTP:-off}"
+backup_hour_utc="${ACTA_BACKUP_HOUR_UTC:-3}"
 
 die() { echo "error: $*" >&2; exit 1; }
 
 [[ -n "$s3_bucket" ]] || die "ACTA_S3_BUCKET is empty; nothing to restore from"
-ssh "$host" bash -s -- "$@" <<'EOF'
+
+# The restore one-shot does not need auth, so only the S3 configuration and the
+# AWS credentials are passed. Options must stay before the image name.
+opts=(
+    podman run --rm
+    -v acta-data:/data
+    --env ACTA_DATA_DIR=/data
+    --env ACTA_BACKUP=on
+    --env "ACTA_BACKUP_HOUR_UTC=${backup_hour_utc}"
+    --env "ACTA_S3_BUCKET=${s3_bucket}"
+    --env "ACTA_S3_REGION=${s3_region}"
+    --env "ACTA_S3_PREFIX=${s3_prefix}"
+    --secret acta-aws-key-id,type=env,target=AWS_ACCESS_KEY_ID
+    --secret acta-aws-secret,type=env,target=AWS_SECRET_ACCESS_KEY
+)
+if [[ -n "$s3_endpoint" ]]; then
+    opts+=(--env "ACTA_S3_ENDPOINT=${s3_endpoint}")
+fi
+if [[ "$s3_allow_http" == "on" ]]; then
+    opts+=(--env ACTA_S3_ALLOW_HTTP=on)
+fi
+
+remote_cmd=("${opts[@]}" localhost/acta:current restore "$@")
+
+ssh "$host" bash -s -- "${remote_cmd[@]}" <<'EOF'
 set -euo pipefail
 systemctl --user stop acta >/dev/null 2>&1 || true
 podman image exists localhost/acta:current || { echo "no localhost/acta:current image"; exit 1; }
-podman run --rm \
-    -v acta-data:/data \
-    --env-file "$HOME/.config/acta/acta.env" \
-    --secret acta-auth-ui-password,type=env,target=ACTA_AUTH_UI_PASSWORD \
-    --secret acta-auth-sensor-password,type=env,target=ACTA_AUTH_SENSOR_PASSWORD \
-    --secret acta-aws-key-id,type=env,target=AWS_ACCESS_KEY_ID \
-    --secret acta-aws-secret,type=env,target=AWS_SECRET_ACCESS_KEY \
-    localhost/acta:current restore "$@"
+"$@"
 systemctl --user start acta
 EOF

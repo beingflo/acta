@@ -121,25 +121,27 @@ restarting. `Containerfile`, `.containerignore` and `acta.container` hold the de
 compile wants roughly 8 CPUs and 12 GiB in the podman machine; afterwards the cargo target and npm caches reduce an
 ordinary change to a few seconds.
 
-State lives in three places, none of which a deploy touches:
+State lives in two places, neither of which a deploy touches:
 
 - `acta-data` (named volume) at `/data` — the Parquet tree, owned by podman and never a bind mount.
 - `~/acta/tiles` — the PMTiles archives, mounted read-only. Regenerated on the host and copied with
   `mise run deploy:tiles`; the container never writes there.
-- `~/.config/acta/acta.env` — non-secret configuration (memory limit, backup schedule, S3 endpoint, usernames), plus
-  the podman secrets `acta-auth-ui-password`, `acta-auth-sensor-password`, `acta-aws-key-id` and `acta-aws-secret`,
-  installed with `mise run deploy:secrets`.
+
+Credentials live in the podman secrets `acta-auth-ui-password`, `acta-auth-sensor-password`, `acta-aws-key-id` and
+`acta-aws-secret`, installed with `mise run deploy:secrets`.
 
 `mise run deploy:seed <dir>` imports a fresh dataset into an empty volume and `mise run deploy:restore` recovers one
 from S3. Only one container may use the data volume at a time: the service assumes it owns the tree, including
 `.staging/` and `.trash/`.
 
 The deploy tasks read their inputs from `.env.deploy` or the environment: `ACTA_HOST`, `ACTA_S3_BUCKET`,
-`ACTA_S3_REGION`, `ACTA_S3_ENDPOINT`, `ACTA_S3_PREFIX`, `ACTA_BACKUP_HOUR_UTC`, `ACTA_AUTH_UI_USER`,
-`ACTA_AUTH_SENSOR_USER`, `ACTA_MEMORY_LIMIT`, `ACTA_INGEST_BACKLOG`, and the secrets `ACTA_AUTH_UI_PASSWORD`,
-`ACTA_AUTH_SENSOR_PASSWORD`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. The non-secret values are written to
-`~/.config/acta/acta.env` (the quadlet's `EnvironmentFile`); the secrets become podman secrets injected by the
-`Secret=` lines.
+`ACTA_S3_REGION`, `ACTA_S3_ENDPOINT`, `ACTA_S3_PREFIX`, `ACTA_S3_ALLOW_HTTP`, `ACTA_BACKUP_HOUR_UTC`,
+`ACTA_AUTH_UI_USER`, `ACTA_AUTH_SENSOR_USER`, `ACTA_MEMORY_LIMIT`, `ACTA_INGEST_BACKLOG`, and the secrets
+`ACTA_AUTH_UI_PASSWORD`, `ACTA_AUTH_SENSOR_PASSWORD`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. The
+non-secret values are rendered into the quadlet as `Environment=` lines, so `systemctl --user cat acta` shows the
+effective configuration; the secrets become podman secrets injected by the `Secret=` lines. `mise run
+deploy:secrets` also restarts `acta` when it is already installed, because a running container keeps the environment
+it started with; before the first deploy it only installs the secrets.
 
 ## Configuration
 

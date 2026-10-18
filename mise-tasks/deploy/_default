@@ -16,6 +16,7 @@ s3_bucket="${ACTA_S3_BUCKET:-}"
 s3_region="${ACTA_S3_REGION:-us-east-1}"
 s3_endpoint="${ACTA_S3_ENDPOINT:-}"
 s3_prefix="${ACTA_S3_PREFIX:-}"
+s3_allow_http="${ACTA_S3_ALLOW_HTTP:-off}"
 backup_hour_utc="${ACTA_BACKUP_HOUR_UTC:-3}"
 ui_user="${ACTA_AUTH_UI_USER:-flo}"
 sensor_user="${ACTA_AUTH_SENSOR_USER:-sensors}"
@@ -55,30 +56,41 @@ if [[ -n "$s3_bucket" ]]; then
     backup="on"
 fi
 
-note "writing ~/.config/acta/acta.env on ${host}"
-ssh "$host" 'mkdir -p "$HOME/.config/acta" && umask 077 && cat > "$HOME/.config/acta/acta.env"' <<EOF
-ACTA_ADDR=0.0.0.0:8080
-ACTA_DATA_DIR=/data
-ACTA_UI_DIR=/usr/src/app/ui/dist
-ACTA_TILES_DIR=/usr/src/app/tiles
-ACTA_MEMORY_LIMIT=${memory_limit}
-ACTA_INGEST_BACKLOG=${ingest_backlog}
-ACTA_BACKUP=${backup}
-ACTA_BACKUP_HOUR_UTC=${backup_hour_utc}
-ACTA_S3_BUCKET=${s3_bucket}
-ACTA_S3_REGION=${s3_region}
-ACTA_S3_ENDPOINT=${s3_endpoint}
-ACTA_S3_PREFIX=${s3_prefix}
-ACTA_AUTH_UI_USER=${ui_user}
-ACTA_AUTH_SENSOR_USER=${sensor_user}
+# Non-secret configuration is rendered straight into the quadlet, so the unit
+# is the single source of truth and there is no second file to keep in sync.
+config="$(cat <<EOF
+Environment=ACTA_ADDR=0.0.0.0:8080
+Environment=ACTA_DATA_DIR=/data
+Environment=ACTA_UI_DIR=/usr/src/app/ui/dist
+Environment=ACTA_TILES_DIR=/usr/src/app/tiles
+Environment=ACTA_MEMORY_LIMIT=${memory_limit}
+Environment=ACTA_INGEST_BACKLOG=${ingest_backlog}
+Environment=ACTA_BACKUP=${backup}
+Environment=ACTA_BACKUP_HOUR_UTC=${backup_hour_utc}
+Environment=ACTA_S3_BUCKET=${s3_bucket}
+Environment=ACTA_S3_REGION=${s3_region}
+Environment=ACTA_S3_PREFIX=${s3_prefix}
+Environment=ACTA_AUTH_UI_USER=${ui_user}
+Environment=ACTA_AUTH_SENSOR_USER=${sensor_user}
 EOF
+)"
+if [[ -n "$s3_endpoint" ]]; then
+    config+=$'\n'"Environment=ACTA_S3_ENDPOINT=${s3_endpoint}"
+fi
+if [[ "$s3_allow_http" == "on" ]]; then
+    config+=$'\n'"Environment=ACTA_S3_ALLOW_HTTP=on"
+fi
 
 note "installing acta.container (${tag})"
 if [[ -n "$s3_bucket" ]]; then
     sed "s|__TAG__|${tag}|g" acta.container
 else
     sed -e "s|__TAG__|${tag}|g" -e '/type=env,target=AWS_/d' acta.container
-fi | ssh "$host" 'mkdir -p "$HOME/.config/containers/systemd" && cat > "$HOME/.config/containers/systemd/acta.container"'
+fi | CONFIG="$config" awk '{ if ($0 == "__CONFIG__") print ENVIRON["CONFIG"]; else print }' \
+  | ssh "$host" 'mkdir -p "$HOME/.config/containers/systemd" && cat > "$HOME/.config/containers/systemd/acta.container"'
+
+# Drop the env file written by older deploys; it is no longer referenced.
+ssh "$host" 'rm -f "$HOME/.config/acta/acta.env"; rmdir "$HOME/.config/acta" 2>/dev/null || true'
 
 note "restarting"
 ssh "$host" 'systemctl --user daemon-reload && systemctl --user restart acta'

@@ -8,11 +8,12 @@ Image=localhost/acta:__TAG__
 PublishPort=127.0.0.1:8080:8080
 
 # Data lives in a named volume; tiles are read-only and regenerated on the
-# host. Non-secret configuration is in the env file; credentials are podman
-# secrets so they never appear in the unit or its environment dump.
+# host. Non-secret configuration is rendered into the Environment= lines below
+# by `mise run deploy`; credentials are podman secrets, so they never appear in
+# the unit or the image.
 Volume=acta-data:/data
 Volume=%h/acta/tiles:/usr/src/app/tiles:ro,Z
-EnvironmentFile=%h/.config/acta/acta.env
+__CONFIG__
 Environment=TZ=UTC
 Environment=RUST_LOG=info
 
