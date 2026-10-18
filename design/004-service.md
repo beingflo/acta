@@ -134,6 +134,80 @@ State lives in three places, none of which a deploy touches:
 from S3. Only one container may use the data volume at a time: the service assumes it owns the tree, including
 `.staging/` and `.trash/`.
 
+The deploy tasks read their inputs from `.env.deploy` or the environment: `ACTA_HOST`, `ACTA_S3_BUCKET`,
+`ACTA_S3_REGION`, `ACTA_S3_ENDPOINT`, `ACTA_S3_PREFIX`, `ACTA_BACKUP_HOUR_UTC`, `ACTA_AUTH_UI_USER`,
+`ACTA_AUTH_SENSOR_USER`, `ACTA_MEMORY_LIMIT`, `ACTA_INGEST_BACKLOG`, and the secrets `ACTA_AUTH_UI_PASSWORD`,
+`ACTA_AUTH_SENSOR_PASSWORD`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. The non-secret values are written to
+`~/.config/acta/acta.env` (the quadlet's `EnvironmentFile`); the secrets become podman secrets injected by the
+`Secret=` lines.
+
+## Configuration
+
+Every setting is an environment variable; unset means the default. Sizes are bytes and durations are milliseconds.
+
+### Server and paths
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ACTA_ADDR` | `127.0.0.1:8080` | Listen address. The container sets `0.0.0.0:8080`. |
+| `ACTA_DATA_DIR` | `data` | Parquet tree; created if missing, must be writable. |
+| `ACTA_UI_DIR` | `ui/dist` | Built frontend, served at `/`. |
+| `ACTA_TILES_DIR` | `tiles` | PMTiles archives, served at `/tiles/*`. |
+| `RUST_LOG` | `info` | `tracing` filter, e.g. `info,acta=debug`. |
+
+### Read path
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ACTA_POOL_SIZE` | `4` | DuckDB connections. Each is an independent in-memory database. |
+| `ACTA_MEMORY_LIMIT` | `1GB` | DuckDB memory limit **per connection**, in DuckDB size syntax. With pool 4 the worst case is four times this. |
+| `ACTA_THREADS` | `1` | DuckDB threads per connection. |
+| `ACTA_QUERY_TIMEOUT_MS` | `10000` | Per-query interrupt timeout. |
+| `ACTA_MAX_RESPONSE_BYTES` | `8388608` | Maximum JSON response size; a larger result is rejected. |
+
+### Write path and compaction
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ACTA_FLUSH_INTERVAL_MS` | `10000` | Longest a row waits in memory before its `hot-` file is written. |
+| `ACTA_FLUSH_MAX_ROWS` | `50000` | Flush early at this many buffered rows. |
+| `ACTA_FLUSH_MAX_BYTES` | `67108864` | Flush early at 64 MiB of buffered payload. |
+| `ACTA_INGEST_BACKLOG` | `256` | Batches queued before ingest applies backpressure. |
+| `ACTA_INGEST_MAX_BODY_BYTES` | `16777216` | `POST /api/ingest` body limit; larger gets `413`. |
+| `ACTA_INGEST_MAX_BATCH` | `10000` | Rows per ingest request; larger gets `413`. |
+| `ACTA_COMPACTION_INTERVAL_MS` | `60000` | Compaction pass cadence. |
+| `ACTA_COMPACTION_GRACE_MS` | `30000` | Delay after a bucket closes before folding, so in-flight flushes land first. |
+| `ACTA_ROW_GROUP_SIZE` | `250000` | Rows per Parquet row group. |
+| `ACTA_TRASH_RETENTION_MS` | `86400000` | How long superseded files stay in `.trash/`. |
+| `ACTA_TRASH_GC_INTERVAL_MS` | `600000` | Trash sweep cadence. |
+
+### Auth
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ACTA_AUTH_UI_USER` + `ACTA_AUTH_UI_PASSWORD` | unset | Enables authentication. The UI credential may reach every path. |
+| `ACTA_AUTH_SENSOR_USER` + `ACTA_AUTH_SENSOR_PASSWORD` | unset | Optional sensor credential; may only `POST /api/ingest`. |
+
+Set each pair together. Setting only the sensor pair is a startup error (it would leave the UI open); with no UI
+credential, authentication is off.
+
+### Backup
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ACTA_BACKUP` | `off` | `on` enables the daily upload pass. |
+| `ACTA_BACKUP_HOUR_UTC` | `3` | Hour (UTC) of the daily pass. |
+| `ACTA_S3_BUCKET` | unset | Required when backup is on. |
+| `ACTA_S3_REGION` | `us-east-1` | |
+| `ACTA_S3_ENDPOINT` | unset | For S3-compatible providers. |
+| `ACTA_S3_PREFIX` | empty | Optional key prefix. |
+| `ACTA_S3_ALLOW_HTTP` | `off` | Allow a plain-HTTP endpoint (for example a local MinIO). |
+| `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` | unset | Required when backup is on. |
+
+With `ACTA_BACKUP` off, none of the S3 variables are read and no upload is attempted.
+
+`TZ` is not a service setting: the bundled DuckDB has no ICU, so timestamp handling is always UTC.
+
 ## Testing
 
 `mise run test` runs the hurl scenarios against a running service's read API (see `design/003-visualization.md`).
