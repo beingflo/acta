@@ -4,12 +4,9 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
-if [[ -f .env.deploy ]]; then
-    set -a
-    # shellcheck disable=SC1091
-    source .env.deploy
-    set +a
-fi
+# shellcheck source=/dev/null
+source "$root/mise-tasks/lib/env.sh"
+load_deploy_env
 
 host="${ACTA_HOST:-eos}"
 

@@ -13,6 +13,9 @@ __pycache__/
 *.pmtiles
 tiles/regions/
 
-# Deployment config/secrets
+# Deployment credentials. `.deploy.secrets` is the gitignored plaintext that
+# gets sops-encrypted into the committed `.deploy.secrets.enc`.
+# The `.env*` names are kept so a legacy plaintext file can never be committed.
 .env
 .env.deploy
+.deploy.secrets

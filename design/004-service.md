@@ -109,7 +109,9 @@ can contain both a finer tier and the coarser file that superseded it; the first
 reconciles them with the existing "target exists, so trash the inputs" rule, so duplicates are harmless.
 
 Credentials come from `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (podman secrets); bucket, region, endpoint and
-prefix from the environment. Uploads run in their own task and never block ingestion or compaction; a failed pass
+prefix from the environment. The upload speaks the S3 protocol but is not tied to AWS: it runs against Backblaze B2,
+which requires its own endpoint and region. The `AWS_*` variable names are simply what the S3 library reads.
+Uploads run in their own task and never block ingestion or compaction; a failed pass
 only logs a warning and is retried on the next one.
 
 ## Deployment
@@ -127,21 +129,26 @@ State lives in two places, neither of which a deploy touches:
 - `~/acta/tiles` — the PMTiles archives, mounted read-only. Regenerated on the host and copied with
   `mise run deploy:tiles`; the container never writes there.
 
-Credentials live in the podman secrets `acta-auth-ui-password`, `acta-auth-sensor-password`, `acta-aws-key-id` and
-`acta-aws-secret`, installed with `mise run deploy:secrets`.
+Credentials are podman secrets: `acta-auth-ui-user`/`-password`, `acta-auth-sensor-user`/`-password`,
+`acta-aws-key-id` and `acta-aws-secret`, installed with `mise run deploy:secrets`. Both halves of each auth pair are
+secrets, so a username never appears in the unit either. The values are committed as ciphertext in
+`.deploy.secrets.enc`, a sops dotenv file encrypted to the age recipient in `.sops.yaml`; the private key is the
+1Password item `SOPS age key - acta`, read into a variable by the one task that needs it and never written to disk.
+The plaintext `.deploy.secrets` is gitignored and sealed by hand with sops; only the ciphertext is committed, so the
+committed file is the single source of truth for the deployed credentials.
 
 `mise run deploy:seed <dir>` imports a fresh dataset into an empty volume and `mise run deploy:restore` recovers one
 from S3. Only one container may use the data volume at a time: the service assumes it owns the tree, including
 `.staging/` and `.trash/`.
 
-The deploy tasks read their inputs from `.env.deploy` or the environment: `ACTA_HOST`, `ACTA_S3_BUCKET`,
-`ACTA_S3_REGION`, `ACTA_S3_ENDPOINT`, `ACTA_S3_PREFIX`, `ACTA_S3_ALLOW_HTTP`, `ACTA_BACKUP_HOUR_UTC`,
-`ACTA_AUTH_UI_USER`, `ACTA_AUTH_SENSOR_USER`, `ACTA_MEMORY_LIMIT`, `ACTA_INGEST_BACKLOG`, and the secrets
-`ACTA_AUTH_UI_PASSWORD`, `ACTA_AUTH_SENSOR_PASSWORD`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. The
-non-secret values are rendered into the quadlet as `Environment=` lines, so `systemctl --user cat acta` shows the
-effective configuration; the secrets become podman secrets injected by the `Secret=` lines. `mise run
-deploy:secrets` also restarts `acta` when it is already installed, because a running container keeps the environment
-it started with; before the first deploy it only installs the secrets.
+`.deploy.env` (committed) holds the non-secret inputs, led by `ACTA_HOST` and the S3 settings; the file lists every
+service setting the deploy can pass through, with its default. All of them are rendered into the quadlet as
+`Environment=` lines, so `systemctl --user cat acta` shows the effective configuration. The credentials
+`ACTA_AUTH_UI_USER`/`ACTA_AUTH_UI_PASSWORD`, `ACTA_AUTH_SENSOR_USER`/`ACTA_AUTH_SENSOR_PASSWORD`,
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are only decrypted by `mise run deploy:secrets`, which hands them to
+podman; `mise run deploy` never sees a secret value, it checks with `podman secret exists` that they were installed.
+`mise run deploy:secrets` also restarts `acta` when it is already installed, because a running container keeps the
+environment it started with; before the first deploy it only installs the secrets.
 
 ## Configuration
 
@@ -191,7 +198,8 @@ Every setting is an environment variable; unset means the default. Sizes are byt
 | `ACTA_AUTH_SENSOR_USER` + `ACTA_AUTH_SENSOR_PASSWORD` | unset | Optional sensor credential; may only `POST /api/ingest`. |
 
 Set each pair together. Setting only the sensor pair is a startup error (it would leave the UI open); with no UI
-credential, authentication is off.
+credential, authentication is off. `mise run deploy:secrets` installs both pairs, usernames included, as podman
+secrets, so the deploy always enables authentication.
 
 ### Backup
 
@@ -201,7 +209,7 @@ credential, authentication is off.
 | `ACTA_BACKUP_HOUR_UTC` | `3` | Hour (UTC) of the daily pass. |
 | `ACTA_S3_BUCKET` | unset | Required when backup is on. |
 | `ACTA_S3_REGION` | `us-east-1` | |
-| `ACTA_S3_ENDPOINT` | unset | For S3-compatible providers. |
+| `ACTA_S3_ENDPOINT` | unset | Endpoint of the S3-compatible provider; required for Backblaze B2. |
 | `ACTA_S3_PREFIX` | empty | Optional key prefix. |
 | `ACTA_S3_ALLOW_HTTP` | `off` | Allow a plain-HTTP endpoint (for example a local MinIO). |
 | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` | unset | Required when backup is on. |

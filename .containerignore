@@ -20,6 +20,10 @@ service/target/
 ui/node_modules/
 ui/dist/
 
-# Local deployment config (if present)
+# Local deployment config and credentials (if present). The image never needs
+# any of them; the container gets its configuration from the quadlet.
 .env
 .env.deploy
+.deploy.env
+.deploy.secrets
+.deploy.secrets.enc

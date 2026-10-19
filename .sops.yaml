@@ -1,0 +1,15 @@
+# sops configuration for the deploy credentials.
+#
+# Fill in the public key of the acta age key. Its private half lives in the
+# 1Password item "SOPS age key - acta" and is only ever read into a variable by
+# `mise run deploy:secrets`.
+#
+# Seal the plaintext credentials with:
+#   sops --encrypt --input-type dotenv --output-type dotenv \
+#       .deploy.secrets > .deploy.secrets.enc
+#
+# sops resolves creation rules from the *input* path, so the rule matches the
+# gitignored plaintext `.deploy.secrets` and its encrypted counterpart.
+creation_rules:
+  - path_regex: \.deploy\.secrets(\.enc)?$
+    age: ""
