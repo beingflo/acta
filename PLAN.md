@@ -7,6 +7,7 @@ This document outlines the phases of development of Acta.
 [x] Define exact Parquet schema
 [x] Map existing otel-traces data to schema
 [x] Create script that migrates traces dump to acta file
+[x] Split migrated data into the live tier files
 
 ## Phase 2: Read path
 

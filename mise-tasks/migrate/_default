@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#MISE description="Run the per-source migrations and combine them into data/data.parquet"
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$root"
+
+# The migration needs duckdb, which is installed in the local venv.
+python="$root/migration/.venv/bin/python"
+[[ -x "$python" ]] || python=python3
+
+exec "$python" "$root/migration/migrate_all.py" "$@"

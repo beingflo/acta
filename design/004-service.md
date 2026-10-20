@@ -96,7 +96,7 @@ ever holds superseded files; it is swept periodically and anything younger than 
 ## Backup
 
 Once at startup and daily at `ACTA_BACKUP_HOUR_UTC` (03:00 UTC by default), the service uploads every completed tier
-file (the `day-` and `month-` files) plus any archive file at the top level, such as the migration's `data.parquet`.
+file (the `day-` and `month-` files) plus any other Parquet file at the top level.
 Hot, recent and hour files are skipped: they are superseded within the day and would only add short-lived objects.
 Nothing is ever deleted, and a name is uploaded once, so no bug can destroy the backup. Only completed tiers are
 uploaded, so at most the current day is at risk, and a missed pass is caught up by the next one (the scan uploads
@@ -226,5 +226,5 @@ which exercises the whole write path including tier compaction. It targets `ACTA
 `127.0.0.1:8080`); set `ACTA_AUTH=user:pass` when the target has authentication enabled. `--fast` compresses the
 cadence and `--duration` bounds the run. `--load` switches to load-test
 mode: it ramps concurrent connections until throughput plateaus or errors rise, then holds, reporting requests/s,
-rows/s and latency percentiles. To test with a clean dataset, point a service at a scratch `ACTA_DATA_DIR` or move
-`data/data.parquet` aside — the migration regenerates it from `traces.parquet`.
+rows/s and latency percentiles. To test with a clean dataset, point a service at a scratch `ACTA_DATA_DIR` or empty
+`data/`; `mise run migrate` followed by `mise run migrate:split` rebuilds the tier files from `traces.parquet`.

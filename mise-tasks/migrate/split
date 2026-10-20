@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#MISE description="Split data/data.parquet into the live tier files in data/"
+#USAGE flag "--input <path>" help="Combined archive written by migrate_all.py (default data/data.parquet)"
+#USAGE flag "--now <rfc3339>" help="Reference instant that decides which buckets are closed"
+#USAGE flag "--force" help="Replace tier files left in data/ by an earlier split"
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$root"
+
+# The split needs duckdb, which is installed in the local venv.
+python="$root/migration/.venv/bin/python"
+[[ -x "$python" ]] || python=python3
+
+exec "$python" "$root/migration/split_tiers.py" "$@"
