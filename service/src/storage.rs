@@ -62,10 +62,19 @@ pub fn clear_staging(staging: &Path) {
     }
 }
 
+/// Parquet files the service owns. AppleDouble sidecars (`._name`) are macOS
+/// metadata left behind by tar extraction, not data, and reading one fails the
+/// view that spans the data directory.
+fn is_data_file(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| !name.to_string_lossy().starts_with('.'))
+        && path.extension().is_some_and(|ext| ext == "parquet")
+}
+
 pub fn has_parquet(data_dir: &Path) -> std::io::Result<bool> {
     for entry in std::fs::read_dir(data_dir)? {
         let entry = entry?;
-        if entry.path().extension().is_some_and(|ext| ext == "parquet") {
+        if is_data_file(&entry.path()) {
             return Ok(true);
         }
     }
@@ -79,7 +88,7 @@ pub fn list_tier_files(data_dir: &Path) -> std::io::Result<Vec<TierFile>> {
     for entry in std::fs::read_dir(data_dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.extension().is_none_or(|ext| ext != "parquet") {
+        if !is_data_file(&path) {
             continue;
         }
         let name = entry.file_name().to_string_lossy().into_owned();

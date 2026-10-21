@@ -197,7 +197,11 @@ fn connect(options: &DbOptions) -> Result<Connection, String> {
 }
 
 impl DbOptions {
+    /// `[!.]` skips AppleDouble sidecars (`._name`) that macOS tar extraction
+    /// leaves next to every file: they are metadata, not Parquet, and reading
+    /// one fails the whole view with "No magic bytes found at end of file".
+    /// Tier files and `_seed.parquet` are unaffected.
     fn glob_pattern(&self) -> String {
-        format!("{}/*.parquet", self.data_dir.display())
+        format!("{}/[!.]*.parquet", self.data_dir.display())
     }
 }

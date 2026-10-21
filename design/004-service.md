@@ -137,9 +137,9 @@ secrets, so a username never appears in the unit either. The values are committe
 The plaintext `.deploy.secrets` is gitignored and sealed by hand with sops; only the ciphertext is committed, so the
 committed file is the single source of truth for the deployed credentials.
 
-`mise run deploy:seed <dir>` imports a fresh dataset into an empty volume and `mise run deploy:restore` recovers one
-from S3. Only one container may use the data volume at a time: the service assumes it owns the tree, including
-`.staging/` and `.trash/`.
+`mise run deploy:seed <dir>` imports a fresh dataset and refuses a volume that already holds data, printing the
+command to clear it; `mise run deploy:restore` recovers one from S3. Only one container may use the data volume at a
+time: the service assumes it owns the tree, including `.staging/` and `.trash/`.
 
 `.deploy.env` (committed) holds the non-secret inputs, led by `ACTA_HOST` and the S3 settings; the file lists every
 service setting the deploy can pass through, with its default. All of them are rendered into the quadlet as

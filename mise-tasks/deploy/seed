@@ -11,6 +11,7 @@ load_deploy_env
 
 host="${ACTA_HOST:-eos}"
 dir="${1:-}"
+image=localhost/acta:current
 
 die() { echo "error: $*" >&2; exit 1; }
 note() { echo "==> $*"; }
@@ -19,9 +20,64 @@ note() { echo "==> $*"; }
 count="$(find "$dir" -maxdepth 1 -name '*.parquet' | wc -l | tr -d ' ')"
 [[ "$count" -gt 0 ]] || die "no *.parquet files in ${dir}"
 
+# Seeding overwrites files of the same name and adds the rest, so it must only
+# ever run against a volume that holds no data. The check is read-only and runs
+# before anything is stopped: a running service is production, and aborting
+# must leave it untouched.
+#
+# `_seed.parquet` does not count — the service writes it on every start against
+# an empty volume — and neither do the .staging/ and .trash/ directories, which
+# always exist. Anything else ending in .parquet, AppleDouble sidecars included,
+# blocks the import.
+note "checking that acta-data holds no data yet"
+existing="$(ssh "$host" "podman run --rm -v acta-data:/data:ro --entrypoint /bin/sh ${image} -c 'ls -1 /data/*.parquet 2>/dev/null | grep -vx /data/_seed.parquet || true'" 2>/dev/null)" \
+    || die "could not inspect acta-data (is the ${image} image deployed?)"
+if [[ -n "$existing" ]]; then
+    files="$(printf '%s\n' "$existing" | wc -l | tr -d ' ')"
+    printf '%s\n' "$existing" | head -5 | sed 's|^/data/|    |'
+    [[ "$files" -le 5 ]] || echo "    ..."
+    die "acta-data already holds ${files} parquet file(s); refusing to overwrite it.
+
+Nothing was changed. To replace the data, clear the volume first and re-run:
+    ssh ${host} 'systemctl --user stop acta; podman volume rm acta-data'
+    mise run deploy:seed ${dir}"
+fi
+
+# Stopping the service is part of seeding, so bring it back on every exit path:
+# a failed or interrupted import must not leave acta down.
+restore_service() {
+    ssh "$host" 'systemctl --user start acta' >/dev/null 2>&1 \
+        || echo "warning: acta is still stopped; start it with: ssh $host systemctl --user start acta" >&2
+    ssh "$host" 'podman ps --format "{{.Names}}" | grep -qx systemd-acta' >/dev/null 2>&1 \
+        || echo "warning: acta did not stay running; check: ssh $host journalctl --user -u acta -n 50" >&2
+}
+trap restore_service EXIT INT TERM
+
 note "stopping acta and importing ${count} files into acta-data"
-echo "    (the volume must be empty; existing files with the same name are overwritten)"
-ssh "$host" 'podman volume create acta-data >/dev/null 2>&1 || true; systemctl --user stop acta >/dev/null 2>&1 || true'
-( cd "$dir" && tar -cf - -- *.parquet ) | ssh "$host" 'podman volume import acta-data -'
-ssh "$host" 'systemctl --user start acta'
+ssh "$host" 'systemctl --user stop acta >/dev/null 2>&1 || true'
+# COPYFILE_DISABLE keeps macOS from recording extended attributes in the
+# archive. Without it, `podman volume import` turns each file's xattrs into an
+# AppleDouble `._name` sidecar, which the DuckDB view would then try to read.
+( cd "$dir" && COPYFILE_DISABLE=1 tar -cf - -- *.parquet ) | ssh "$host" 'podman volume import acta-data -'
+
+# Confirm the import landed intact. A truncated parquet still leaves the seed
+# looking successful, then breaks startup with "No magic bytes found at end of
+# file", so compare every file's size rather than trusting the extraction.
+remote_sizes="$(ssh "$host" "podman run --rm -v acta-data:/data:ro --entrypoint /bin/sh ${image} -c 'stat -c \"%s %n\" /data/*.parquet; ls -d /data/._* 2>/dev/null'" 2>/dev/null)" \
+    || die "could not list the volume contents"
+bad=""
+for f in "$dir"/*.parquet; do
+    name="$(basename "$f")"
+    local_size="$(wc -c < "$f" | tr -d ' ')"
+    remote_size="$(printf '%s\n' "$remote_sizes" | awk -v p="/data/${name}" '$2 == p { print $1; exit }')"
+    [[ "$remote_size" == "$local_size" ]] \
+        || bad+=" ${name}(${remote_size:-missing} != ${local_size})"
+done
+[[ -z "$bad" ]] || die "import is incomplete or truncated:${bad}"
+
+# AppleDouble sidecars are macOS metadata, not data; the read view trips over
+# them. COPYFILE_DISABLE above should prevent them, so any are a real problem.
+stray="$(printf '%s\n' "$remote_sizes" | grep -c '/\._' || true)"
+[[ "$stray" == "0" ]] || die "volume holds ${stray} AppleDouble sidecars (/data/._*); remove them or re-create the volume"
+
 note "seeded"
