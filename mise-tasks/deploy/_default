@@ -109,6 +109,13 @@ ssh "$host" 'rm -f "$HOME/.config/acta/acta.env"; rmdir "$HOME/.config/acta" 2>/
 note "restarting"
 ssh "$host" 'systemctl --user daemon-reload && systemctl --user restart acta'
 
+# A container that dies while starting leaves the unit inactive after a clean
+# exit, so nothing fails loudly. Check before reporting success.
+if ! ssh "$host" 'podman ps --format "{{.Names}}" | grep -qx systemd-acta'; then
+    ssh "$host" 'systemctl --user status acta --no-pager -n 20; echo; podman logs --tail 40 systemd-acta 2>&1' >&2 || true
+    die "acta did not stay running after the restart"
+fi
+
 note "health check"
 if ssh "$host" 'curl -sf --max-time 15 -o /dev/null http://127.0.0.1:8080/health'; then
     echo "ok"

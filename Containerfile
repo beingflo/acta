@@ -29,11 +29,18 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     && rm -rf src
 
 COPY service/src ./src
+# The `touch` is load-bearing. COPY keeps the build context's mtimes, which are
+# older than the fingerprints the priming build above recorded, so cargo treats
+# the package as fresh, skips the rebuild, and /tmp/acta stays the throwaway
+# binary from that layer — a container that exits 0 before logging anything.
+# The size check fails the build loudly if that ever happens again.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/src/acta/service/target \
-    cargo build --release \
-    && cp target/release/acta /tmp/acta
+    find src -exec touch {} + \
+    && cargo build --release \
+    && cp target/release/acta /tmp/acta \
+    && test "$(stat -c %s /tmp/acta)" -gt 1000000
 
 # --- runtime ----------------------------------------------------------------
 FROM debian:bookworm-slim AS runtime
