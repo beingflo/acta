@@ -63,7 +63,7 @@ ssh "$host" 'systemctl --user stop acta >/dev/null 2>&1 || true'
 # Confirm the import landed intact. A truncated parquet still leaves the seed
 # looking successful, then breaks startup with "No magic bytes found at end of
 # file", so compare every file's size rather than trusting the extraction.
-remote_sizes="$(ssh "$host" "podman run --rm -v acta-data:/data:ro --entrypoint /bin/sh ${image} -c 'stat -c \"%s %n\" /data/*.parquet; ls -d /data/._* 2>/dev/null'" 2>/dev/null)" \
+remote_sizes="$(ssh "$host" "podman run --rm -v acta-data:/data:ro --entrypoint /bin/sh ${image} -c 'stat -c \"%s %n\" /data/*.parquet; ls -d /data/._* 2>/dev/null || true'" 2>/dev/null)" \
     || die "could not list the volume contents"
 bad=""
 for f in "$dir"/*.parquet; do
