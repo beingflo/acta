@@ -21,6 +21,17 @@ Allowed — reading is always fine:
 
 If a change seems to warrant a commit, make the file edits and tell the user; do not commit.
 
+## Remote access: explicit instruction only
+
+**Never run an SSH command — or anything that opens a connection to another host — without an explicit instruction
+from the user in that turn.** This includes `ssh`, `scp`, `rsync` to a remote target, `podman --remote`, and any task
+that wraps them: `mise run deploy`, `deploy:secrets`, `deploy:tiles`, `deploy:seed`, `deploy:restore`.
+
+Remote hosts are reached through the 1Password SSH agent, so even a read-only probe pops an authorization dialog in
+the user's face. Ask first, or hand the user the command to run.
+
+Local, read-only inspection is always fine.
+
 ## Design docs
 
 `design/*.md` and `PLAN.md` describe the system at a high level. **Keep them in sync with the application.** When a
