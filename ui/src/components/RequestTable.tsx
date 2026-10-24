@@ -388,12 +388,13 @@ export default function RequestTable(props: { source: string; title: string }) {
   )
 }
 
-/** `MM-DD` and `HH:MM:SS` in local time, from microseconds since the epoch. */
+/** `DD-MM` and `HH:MM:SS` in local time, from microseconds since the epoch,
+ *  day first like the chart axes. */
 function timeParts(us: number): { day: string; clock: string } {
   const date = new Date(Math.floor(us / 1000))
   const pad = (part: number) => String(part).padStart(2, '0')
   return {
-    day: `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    day: `${pad(date.getDate())}-${pad(date.getMonth() + 1)}`,
     clock: `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`,
   }
 }

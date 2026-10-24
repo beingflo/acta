@@ -4,7 +4,7 @@ import 'uplot/dist/uPlot.min.css'
 
 import { fetchData } from '../lib/api'
 import { exitFullscreen, fullscreenTile, setHoveredTile } from '../lib/fullscreen'
-import { formatNumber, formatTimestamp, unitOf } from '../lib/format'
+import { axisTickLabels, formatNumber, formatTimestamp, unitOf } from '../lib/format'
 import { clearReadings, claimReadingOrder, publishReadings } from '../lib/latest'
 import { BAR_FILL, fillFor, STROKE } from '../lib/palette'
 import { bucketFor, timeSeriesSql, toAligned, type Series } from '../lib/query'
@@ -214,6 +214,8 @@ export default function TimeSeriesTile(props: {
         font: AXIS_FONT,
         grid: { show: false },
         ticks: { stroke: '#e0e0e0', width: 1 },
+        // uPlot's own day/month/year ticks are month-first.
+        values: (_self, splits, _axisIdx, _space, spacing) => axisTickLabels(splits, spacing),
       },
       {
         stroke: '#222',
