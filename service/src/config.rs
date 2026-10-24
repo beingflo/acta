@@ -131,10 +131,19 @@ fn credential(user_key: &str, password_key: &str) -> Result<Option<Credential>, 
 fn parse_backup() -> Result<BackupOptions, String> {
     let enabled = env_bool("ACTA_BACKUP", false)?;
     let bucket = env_str("ACTA_S3_BUCKET", "");
-    let region = env_str("ACTA_S3_REGION", "us-east-1");
     let endpoint = std::env::var("ACTA_S3_ENDPOINT")
         .ok()
         .filter(|value| !value.is_empty());
+    // A Backblaze endpoint names its own region (`s3.<region>.backblazeb2.com`),
+    // so bucket plus endpoint is enough there. Any other provider sets the region
+    // explicitly, or gets the AWS default.
+    let region = match env_str("ACTA_S3_REGION", "") {
+        region if !region.is_empty() => region,
+        _ => endpoint
+            .as_deref()
+            .and_then(region_from_endpoint)
+            .unwrap_or_else(|| "us-east-1".to_string()),
+    };
     let prefix = env_str("ACTA_S3_PREFIX", "");
     let minute = env_parse("ACTA_BACKUP_MINUTE", 3u32)?;
     let allow_http = env_bool("ACTA_S3_ALLOW_HTTP", false)?;
@@ -162,6 +171,14 @@ fn parse_backup() -> Result<BackupOptions, String> {
         minute,
         allow_http,
     })
+}
+
+fn region_from_endpoint(endpoint: &str) -> Option<String> {
+    let rest = endpoint.split_once("://").map_or(endpoint, |(_, rest)| rest);
+    let host = rest.split('/').next().unwrap_or(rest);
+    let host = host.split(':').next().unwrap_or(host);
+    let region = host.strip_prefix("s3.")?.strip_suffix(".backblazeb2.com")?;
+    (!region.is_empty()).then(|| region.to_string())
 }
 
 fn env_str(key: &str, default: &str) -> String {

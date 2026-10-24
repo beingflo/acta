@@ -49,6 +49,16 @@ fn client(opts: &BackupOptions) -> Result<Arc<AmazonS3>, String> {
     let secret = std::env::var("AWS_SECRET_ACCESS_KEY")
         .map_err(|_| "AWS_SECRET_ACCESS_KEY is not set".to_string())?;
 
+    // Logged once so a deploy can be checked against the provider's console: the
+    // region is derived from a Backblaze endpoint when it is not set explicitly.
+    info!(
+        bucket = %opts.bucket,
+        region = %opts.region,
+        endpoint = opts.endpoint.as_deref().unwrap_or("aws"),
+        prefix = %opts.prefix,
+        "backup target"
+    );
+
     let mut builder = AmazonS3Builder::new()
         .with_bucket_name(&opts.bucket)
         .with_region(&opts.region)
