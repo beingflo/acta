@@ -23,10 +23,18 @@ else
 fi
 
 # Same configuration and credentials the deployed service uses, decrypted through
-# the shared helper: nothing is written to disk and no copy is left behind.
+# the shared helper: nothing is written to disk and no copy is left behind. Both
+# helpers deliberately leave their values as plain shell variables so nothing
+# leaks into a child process such as ssh; the restore binary is exactly such a
+# child, so these have to be exported by hand.
 load_deploy_env
 load_deploy_secrets
+for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+    [[ -n "${!key:-}" ]] || die "${key} is missing from .deploy.secrets.enc"
+done
 [[ -n "${ACTA_S3_BUCKET:-}" ]] || die "ACTA_S3_BUCKET is empty; nothing to restore from"
+export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY \
+    ACTA_S3_BUCKET ACTA_S3_REGION ACTA_S3_ENDPOINT ACTA_S3_PREFIX ACTA_S3_ALLOW_HTTP
 
 # Restore only adds and overwrites, so an existing directory keeps whatever the
 # bucket does not carry. Say so rather than let it look like a clean rebuild.
