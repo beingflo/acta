@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+#MISE description="Restore the S3 backup into a local directory (default data/)"
+#USAGE arg "[dir]" help="target directory; the repo's data/ when omitted"
+#USAGE flag "--force" help="overwrite files that already exist"
+set -euo pipefail
+
+invoked_from="$PWD"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
+# shellcheck source=/dev/null
+source "$root/mise-tasks/lib/env.sh"
+
+dir="${usage_dir:-}"
+if [[ -z "$dir" ]]; then
+    # `mise run restore` with no argument means the directory this checkout serves,
+    # whatever subdirectory the task was invoked from.
+    dir="${root}/data"
+else
+    # A given directory resolves against where the task was invoked, not the repo
+    # root the script needs to sit in for cargo. Restore merges, so a relative path
+    # must mean what the caller saw.
+    [[ "$dir" = /* ]] || dir="${invoked_from}/${dir}"
+fi
+
+# Same configuration and credentials the deployed service uses, decrypted through
+# the shared helper: nothing is written to disk and no copy is left behind.
+load_deploy_env
+load_deploy_secrets
+[[ -n "${ACTA_S3_BUCKET:-}" ]] || die "ACTA_S3_BUCKET is empty; nothing to restore from"
+
+# Restore only adds and overwrites, so an existing directory keeps whatever the
+# bucket does not carry. Say so rather than let it look like a clean rebuild.
+if [[ -d "$dir" ]] && [[ -n "$(ls -A "$dir")" ]]; then
+    note "${dir} is not empty; files absent from the bucket are left alone"
+fi
+
+args=(restore)
+if [[ "${usage_force:-false}" == "true" ]]; then
+    args+=(--force)
+fi
+
+# Release on purpose: it is the profile `service:dev` already builds, so this
+# costs a link rather than a fresh debug tree, and the restored files are then
+# served by the same binary.
+note "restoring into ${dir}"
+ACTA_DATA_DIR="$dir" cargo run --release --manifest-path service/Cargo.toml -- "${args[@]}"
+
+note "serve it with: ACTA_DATA_DIR=${dir} mise run service:dev"
