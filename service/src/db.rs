@@ -182,10 +182,16 @@ fn connect(options: &DbOptions) -> Result<Connection, String> {
     // The view must be created while the data dir is explicitly allowed. Only
     // afterwards is external access switched off and the configuration locked.
     // `allowed_directories` keeps reads of `data_dir` working.
+    //
+    // The downloaded DuckDB release library ships ICU, whose default session
+    // time zone follows the `TZ` environment variable. Pinning it to UTC keeps
+    // every `CAST(timestamp AS TIMESTAMP)` and `time_bucket` independent of the
+    // host, and `lock_configuration` then stops a query from changing it.
     let dir = options.data_dir.display().to_string().replace('\'', "''");
     let glob = options.glob_pattern().replace('\'', "''");
     let setup = format!(
-        "SET allowed_directories = ['{dir}'];\n\
+        "SET TimeZone = 'UTC';\n\
+         SET allowed_directories = ['{dir}'];\n\
          SET enable_external_access = false;\n\
          SET lock_configuration = true;\n\
          CREATE VIEW events AS \

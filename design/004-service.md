@@ -216,7 +216,9 @@ secrets, so the deploy always enables authentication.
 
 With `ACTA_BACKUP` off, none of the S3 variables are read and no upload is attempted.
 
-`TZ` is not a service setting: the bundled DuckDB has no ICU, so timestamp handling is always UTC.
+DuckDB 2.0 implements time zones, calendars and collations in its `icu` extension, which the bundled build does not
+include. The service still pins the session time zone to UTC when it opens a connection and locks the configuration,
+so query results never depend on the host's `TZ`.
 
 ## Testing
 
