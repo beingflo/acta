@@ -33,7 +33,7 @@ pub struct WriteOptions {
     pub ingest_max_batch: usize,
 }
 
-/// Daily S3 backup configuration. Credentials are read from the standard
+/// Hourly S3 backup configuration. Credentials are read from the standard
 /// `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` variables and are deliberately
 /// not stored here, so this struct is safe to log.
 #[derive(Clone, Debug)]
@@ -43,7 +43,7 @@ pub struct BackupOptions {
     pub region: String,
     pub endpoint: Option<String>,
     pub prefix: String,
-    pub hour_utc: u32,
+    pub minute: u32,
     pub allow_http: bool,
 }
 
@@ -136,11 +136,11 @@ fn parse_backup() -> Result<BackupOptions, String> {
         .ok()
         .filter(|value| !value.is_empty());
     let prefix = env_str("ACTA_S3_PREFIX", "");
-    let hour_utc = env_parse("ACTA_BACKUP_HOUR_UTC", 3u32)?;
+    let minute = env_parse("ACTA_BACKUP_MINUTE", 3u32)?;
     let allow_http = env_bool("ACTA_S3_ALLOW_HTTP", false)?;
 
-    if hour_utc > 23 {
-        return Err("ACTA_BACKUP_HOUR_UTC must be between 0 and 23".into());
+    if minute > 59 {
+        return Err("ACTA_BACKUP_MINUTE must be between 0 and 59".into());
     }
     if enabled {
         if bucket.is_empty() {
@@ -159,7 +159,7 @@ fn parse_backup() -> Result<BackupOptions, String> {
         region,
         endpoint,
         prefix,
-        hour_utc,
+        minute,
         allow_http,
     })
 }

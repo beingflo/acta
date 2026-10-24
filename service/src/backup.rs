@@ -1,17 +1,19 @@
-//! Daily S3 backup of completed files, plus restore.
+//! Hourly S3 backup of completed files, plus restore.
 //!
 //! The backup is deliberately append-only: a file is uploaded once, by name,
 //! and never deleted. Restoring the whole bucket can therefore yield two tiers
 //! covering the same span, which the compaction reconcile collapses on its next
-//! pass. Only completed files are uploaded; hot, recent and hour files are
-//! skipped because they are superseded within a day.
+//! pass. Only closed buckets are uploaded: the hour files of the running day
+//! give hour granularity, then day and month files carry the same rows once they
+//! fold. Hot and recent files are skipped because they are superseded within the
+//! hour.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{Timelike, Utc};
 use futures::StreamExt;
 use object_store::aws::{AmazonS3, AmazonS3Builder};
 use object_store::path::Path as ObjectPath;
@@ -21,7 +23,7 @@ use tracing::{info, warn};
 use crate::config::BackupOptions;
 use crate::storage;
 
-/// Run one pass at startup, then one per day at `hour_utc`.
+/// Run one pass at startup, then one per hour at `minute` past the hour.
 pub async fn run(data_dir: PathBuf, opts: BackupOptions) {
     let store = match client(&opts) {
         Ok(store) => store,
@@ -35,7 +37,7 @@ pub async fn run(data_dir: PathBuf, opts: BackupOptions) {
         if let Err(err) = run_once(store.as_ref(), &data_dir, &opts).await {
             warn!(error = %err, "backup pass failed");
         }
-        let wait = until_next_run(opts.hour_utc);
+        let wait = until_next_run(opts.minute);
         info!(seconds = wait.as_secs(), "next backup pass scheduled");
         tokio::time::sleep(wait).await;
     }
@@ -67,10 +69,12 @@ async fn run_once(
     data_dir: &Path,
     opts: &BackupOptions,
 ) -> Result<(), String> {
-    // Back up completed tiers plus any archive file sitting at the top level
-    // (the migration's `data.parquet`, before it is re-split into tiers). Hot,
-    // recent and hour files are skipped: they are superseded within the day and
-    // would only add short-lived objects. The seed carries no rows.
+    // Back up closed buckets plus any archive file sitting at the top level (the
+    // migration's `data.parquet`, before it is re-split into tiers). An `hour-`
+    // file is only written once its hour has closed, so uploading it at the top
+    // of the next hour gives hour granularity while it is still the newest file.
+    // Hot and recent files are skipped: they are superseded within the hour. The
+    // seed carries no rows.
     let mut wanted: Vec<(String, PathBuf)> = Vec::new();
     for entry in std::fs::read_dir(data_dir).map_err(|e| format!("{}: {e}", data_dir.display()))? {
         let entry = entry.map_err(|e| e.to_string())?;
@@ -81,8 +85,7 @@ async fn run_once(
         let skip = !name.ends_with(".parquet")
             || name == storage::SEED_FILE
             || name.starts_with("hot-")
-            || name.starts_with("recent-")
-            || name.starts_with("hour-");
+            || name.starts_with("recent-");
         if !skip {
             wanted.push((name, entry.path()));
         }
@@ -175,17 +178,18 @@ fn prefix(opts: &BackupOptions) -> Option<ObjectPath> {
     }
 }
 
-fn until_next_run(hour_utc: u32) -> Duration {
+/// Time until `minute` past the next hour. Compaction builds an hour file
+/// shortly after its hour closes, so a pass at a few minutes past the hour sees
+/// the file of the hour that just ended.
+fn until_next_run(minute: u32) -> Duration {
     let now = Utc::now();
-    let today = now
-        .date_naive()
-        .and_hms_opt(hour_utc.min(23), 0, 0)
-        .expect("valid hour");
-    let mut next: DateTime<Utc> = Utc.from_utc_datetime(&today);
+    let mut next = now
+        .with_minute(minute.min(59))
+        .and_then(|t| t.with_second(0))
+        .and_then(|t| t.with_nanosecond(0))
+        .expect("valid minute");
     if next <= now {
-        next += chrono::Duration::days(1);
+        next += chrono::Duration::hours(1);
     }
-    (next - now)
-        .to_std()
-        .unwrap_or_else(|_| Duration::from_secs(3_600))
+    (next - now).to_std().unwrap_or_else(|_| Duration::from_secs(60))
 }

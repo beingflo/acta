@@ -108,13 +108,16 @@ ever holds superseded files; it is swept periodically and anything younger than 
 
 ## Backup
 
-Once at startup and daily at `ACTA_BACKUP_HOUR_UTC` (03:00 UTC by default), the service uploads every completed tier
-file (the `day-` and `month-` files) plus any other Parquet file at the top level.
-Hot, recent and hour files are skipped: they are superseded within the day and would only add short-lived objects.
-Nothing is ever deleted, and a name is uploaded once, so no bug can destroy the backup. Only completed tiers are
-uploaded, so at most the current day is at risk, and a missed pass is caught up by the next one (the scan uploads
-whatever eligible files are present). Day files of a month that has already folded into a `month-` file may never
-have been uploaded if the service was down for the whole month; the month file covers those rows.
+Once at startup and then hourly at `ACTA_BACKUP_MINUTE` (three minutes past the hour by default), the service uploads
+every closed bucket: the `hour-` file of the hour that just ended, the `day-` and `month-` files, plus any other
+Parquet file at the top level. An hour file is only written once its hour has closed, and compaction builds it within
+about a minute of the close, so it is the newest object each pass and the whole run stays at most one hour behind the
+live data. Hot and recent files are skipped: they are superseded within the hour and would only add short-lived
+objects. Nothing is ever deleted, and a name is uploaded once, so no bug can destroy the backup. A missed pass is
+caught up by the next one (the scan uploads whatever eligible files are present), so a restart costs at most the
+current hour. Hour files retire into day files at the end of their day, so the hourly objects accumulate as the finer
+granularity of the backup; day files of a month that has already folded into a `month-` file may never have been
+uploaded if the service was down for the whole month, in which case the month file covers those rows.
 
 The bucket holds the file names verbatim under an optional `ACTA_S3_PREFIX`. Restore (`acta restore`, run as a
 one-shot container with the data volume mounted, see `mise run deploy:restore`) downloads every object. A restore
@@ -218,8 +221,8 @@ secrets, so the deploy always enables authentication.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `ACTA_BACKUP` | `off` | `on` enables the daily upload pass. |
-| `ACTA_BACKUP_HOUR_UTC` | `3` | Hour (UTC) of the daily pass. |
+| `ACTA_BACKUP` | `off` | `on` enables the hourly upload pass. |
+| `ACTA_BACKUP_MINUTE` | `3` | Minute past the hour of each pass. |
 | `ACTA_S3_BUCKET` | unset | Required when backup is on. |
 | `ACTA_S3_REGION` | `us-east-1` | |
 | `ACTA_S3_ENDPOINT` | unset | Endpoint of the S3-compatible provider; required for Backblaze B2. |
