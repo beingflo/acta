@@ -183,15 +183,13 @@ fn connect(options: &DbOptions) -> Result<Connection, String> {
     // afterwards is external access switched off and the configuration locked.
     // `allowed_directories` keeps reads of `data_dir` working.
     //
-    // The downloaded DuckDB release library ships ICU, whose default session
-    // time zone follows the `TZ` environment variable. Pinning it to UTC keeps
-    // every `CAST(timestamp AS TIMESTAMP)` and `time_bucket` independent of the
-    // host, and `lock_configuration` then stops a query from changing it.
+    // Do not `SET TimeZone` here: DuckDB 2.0 moved time zones into the `icu`
+    // extension, which the bundled build does not contain, so setting it fails
+    // with an autoload error before anything else runs.
     let dir = options.data_dir.display().to_string().replace('\'', "''");
     let glob = options.glob_pattern().replace('\'', "''");
     let setup = format!(
-        "SET TimeZone = 'UTC';\n\
-         SET allowed_directories = ['{dir}'];\n\
+        "SET allowed_directories = ['{dir}'];\n\
          SET enable_external_access = false;\n\
          SET lock_configuration = true;\n\
          CREATE VIEW events AS \

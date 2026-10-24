@@ -216,9 +216,11 @@ secrets, so the deploy always enables authentication.
 
 With `ACTA_BACKUP` off, none of the S3 variables are read and no upload is attempted.
 
-DuckDB 2.0 implements time zones, calendars and collations in its `icu` extension, which the bundled build does not
-include. The service still pins the session time zone to UTC when it opens a connection and locks the configuration,
-so query results never depend on the host's `TZ`.
+DuckDB 2.0 ships time zone, calendar and collation support as the `icu` extension instead of in the core, and the bundled
+build does not include it. The service therefore never sets a session time zone — `SET TimeZone` would make DuckDB try
+to autoload `icu`, which fails — and all time handling stays in UTC. For the same reason, the writer builds its
+timestamp column with `CAST(make_timestamp(ts_us) AS TIMESTAMPTZ)`; `make_timestamptz` is icu-gated and made every flush
+fail. Anything that needs a named zone, `current_setting('TimeZone')` or `epoch(<timestamptz>)` is unavailable.
 
 ## Testing
 

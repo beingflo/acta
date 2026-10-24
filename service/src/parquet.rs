@@ -38,8 +38,12 @@ pub fn write_hot(
         appender.flush().map_err(|e| e.to_string())?;
     }
 
+    // `make_timestamptz` would be the direct way to build the column, but it
+    // needs the `icu` extension in DuckDB 2.0 and fails the flush. Building a
+    // naive timestamp from the same microseconds and casting it is pure core
+    // arithmetic, and the build has no `icu`, so the session zone is UTC.
     let copy = format!(
-        "COPY (SELECT make_timestamptz(ts_us) AS timestamp, source, \
+        "COPY (SELECT CAST(make_timestamp(ts_us) AS TIMESTAMPTZ) AS timestamp, source, \
                     CAST(CAST(data_json AS JSON) AS VARIANT) AS data \
          FROM buf ORDER BY source, timestamp) \
          TO {} (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE {row_group_size})",

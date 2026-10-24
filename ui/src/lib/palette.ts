@@ -6,6 +6,10 @@ const HUE = 150
 
 export const STROKE = `hsl(${HUE}, 28%, 40%)`
 
+/** Flat fill for bar charts: `fillFor` builds a gradient, which only reads well
+ *  under a line. */
+export const BAR_FILL = `hsla(${HUE}, 30%, 45%, 0.55)`
+
 /** Faint wash of the hue under the curve, fading towards the baseline. */
 export const fillFor = (self: uPlot): CanvasGradient => {
   const gradient = self.ctx.createLinearGradient(0, 0, 0, self.bbox.height)

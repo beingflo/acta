@@ -123,3 +123,67 @@ FROM (
 function escape(value: string): string {
   return value.replace(/'/g, "''")
 }
+
+/** One access-log request, as the request table renders it. */
+export type RequestRow = {
+  /** Event time, epoch seconds. */
+  t: number
+  method: string | null
+  uri: string | null
+  status: number | null
+  /** Response latency in milliseconds. */
+  latency: number | null
+  referrer: string | null
+  /** `user_agent`, mostly to tell people from crawlers. */
+  agent: string | null
+  /** Only set on requests whose handler logged an error. */
+  error: string | null
+}
+
+/** The window every access-log query shares. */
+function requestWindow(source: string, from: Date, to: Date): string {
+  return `source = '${escape(source)}'
+    AND timestamp >= TIMESTAMPTZ '${from.toISOString()}'
+    AND timestamp <  TIMESTAMPTZ '${to.toISOString()}'`
+}
+
+/** Number of requests in the window, which sizes the table's scroll spacer. */
+export function requestCountSql(source: string, from: Date, to: Date): string {
+  return `SELECT to_json(struct_pack(n := count(*)))::VARCHAR
+FROM events
+WHERE ${requestWindow(source, from, to)}`
+}
+
+/** One page of the request table, newest first. Paging keeps the payload small
+ *  however many requests the window holds. */
+export function requestPageSql(options: {
+  source: string
+  from: Date
+  to: Date
+  limit: number
+  offset: number
+}): string {
+  const { source, from, to } = options
+  const limit = Math.max(1, Math.floor(options.limit))
+  const offset = Math.max(0, Math.floor(options.offset))
+  // `data.errors` is a Variant array of `{ event, error }`; its text form is the
+  // only useful rendering for a table cell, and null on requests without one.
+  return `SELECT to_json(array_agg(struct_pack(
+           t := t, method := method, uri := uri, status := status,
+           latency := latency, referrer := referrer, agent := agent, error := error
+         ) ORDER BY t DESC))::VARCHAR
+FROM (
+  SELECT epoch(CAST(timestamp AS TIMESTAMP))    AS t,
+         data.method::VARCHAR                   AS method,
+         data.uri::VARCHAR                      AS uri,
+         TRY_CAST(data.status AS INT)           AS status,
+         TRY_CAST(data.latency_ns AS BIGINT) / 1e6 AS latency,
+         data.referrer::VARCHAR                 AS referrer,
+         data.user_agent::VARCHAR               AS agent,
+         data.errors::VARCHAR                   AS error
+  FROM events
+  WHERE ${requestWindow(source, from, to)}
+  ORDER BY timestamp DESC
+  LIMIT ${limit} OFFSET ${offset}
+)`
+}

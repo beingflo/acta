@@ -87,6 +87,18 @@ The CO2 tile spans the full width. The other tiles are half width, two per row.
 The tiles are fed by three sensors: `co2-sensor-living-room` (co2, temperature, humidity),
 `brightness-barometer-living-room` (lux, pressure, temperature) and `humidity-laundry-room` (humidity, temperature).
 
+### Website
+
+Access logs from the Caddy proxy in front of `marending.dev`, migrated as the `marending` source
+(`{ method, uri, user_agent, referrer, status, latency_ns, errors? }`). A thin full-width bar chart of requests per
+bucket spans the top; below it a table fills the rest of the viewport with the individual requests in the same range:
+time, method, URI, status, latency, referrer, user agent and, where the handler logged one, the error message. Rows
+newest first.
+
+The table is virtualized and paged, because a window can hold hundreds of thousands of requests: a `count(*)` sizes a
+spacer so the scrollbar covers the whole range, and only the pages the visible window touches are fetched (200 rows per
+query, cached, `LIMIT`/`OFFSET`) and only the visible rows are in the DOM.
+
 ### Location
 
 A single full-width and full-height tile showing a map fed by the `location_florian` data source: the position fixes
@@ -121,6 +133,9 @@ instant on all of them. Only x is shared — each tile has its own y scale — s
 vertical line with their tooltip pinned to the top of the plot, and a horizontal line only on the tile being hovered.
 A maximized tile is the only chart on screen, so it is the only one that takes part in that sharing.
 Dragging horizontally selects a custom range; a short drag is ignored, so it still reads as a click.
+
+Charts are lines by default; a tile can ask for bars instead, which is what counts per bucket want. Bars get a flat fill
+and a zero-based y axis, since a bar reads its height from the axis.
 
 Chart areas and summary cards are sized before the first query returns, and a tile whose query is in flight shows a
 small spinner, so nothing shifts when the data lands. The periodic refresh is silent — only a range change or a first

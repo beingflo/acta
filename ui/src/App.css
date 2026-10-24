@@ -293,6 +293,105 @@ body.fullscreen-tile {
   font-variant-numeric: tabular-nums;
 }
 
+/* Website dashboard: a thin request-volume strip above a table that fills the
+   rest of the viewport. */
+.dashboard.website {
+  grid-template-columns: 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: calc(100vh - var(--header-height) - 48px);
+}
+
+.tile.table {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-bottom: 18px;
+  overflow: hidden;
+}
+
+.tile-count {
+  font-weight: 400;
+  color: #999;
+}
+
+.table {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.table-head,
+.table-row {
+  display: grid;
+  grid-template-columns: 120px 58px minmax(160px, 1fr) 50px 72px 140px 200px 150px;
+  gap: 10px;
+  align-items: center;
+}
+
+/* Every cell is one line: the columns stay aligned and long URIs or agent
+   strings are readable through the title attribute instead. */
+.table-head span,
+.table-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table-head {
+  padding-bottom: 6px;
+  font-size: 11px;
+  color: #888;
+  border-bottom: 1px solid #eeeeee;
+}
+
+.table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.table-spacer {
+  position: relative;
+}
+
+/* Rows are absolutely positioned by the row index, so only the visible window
+   is ever in the DOM. */
+.table-window {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  will-change: transform;
+}
+
+.table-row {
+  border-bottom: 1px solid #f7f7f7;
+}
+
+.table-row:hover {
+  background: #fafafa;
+}
+
+.table-time {
+  color: #555;
+}
+
+.table-method {
+  color: #777;
+}
+
+.table .muted {
+  color: #999;
+}
+
+.table .failed {
+  color: #a33;
+}
+
 /* Full-height map dashboard. The map fills the tile edge to edge; the tile's
    border provides the frame. */
 .dashboard.map {

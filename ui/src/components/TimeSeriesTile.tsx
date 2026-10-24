@@ -6,7 +6,7 @@ import { fetchData } from '../lib/api'
 import { exitFullscreen, fullscreenTile, setHoveredTile } from '../lib/fullscreen'
 import { formatNumber, formatTimestamp, unitOf } from '../lib/format'
 import { clearReadings, claimReadingOrder, publishReadings } from '../lib/latest'
-import { fillFor, STROKE } from '../lib/palette'
+import { BAR_FILL, fillFor, STROKE } from '../lib/palette'
 import { bucketFor, timeSeriesSql, toAligned, type Series } from '../lib/query'
 import { dateOnlyRange, range, setCustomRange } from '../lib/range'
 
@@ -28,6 +28,8 @@ export default function TimeSeriesTile(props: {
   yLabel?: string
   height?: number
   wide?: boolean
+  /** Draw bars instead of a line, for counts per bucket. */
+  bars?: boolean
 }) {
   const id = props.title
   // Claimed during setup rather than when the query returns, so the summary
@@ -168,12 +170,19 @@ export default function TimeSeriesTile(props: {
     pxAlign: 0,
     series: [
       {},
-      ...props.series.map((s) => ({
-        label: s.label,
-        stroke: STROKE,
-        width: 1,
-        fill: fillFor,
-      })),
+      ...props.series.map((s) =>
+        props.bars
+          ? {
+              label: s.label,
+              stroke: STROKE,
+              width: 0,
+              fill: BAR_FILL,
+              // 85% of the smallest x step, at most 18px, at least uPlot's 1px
+              // minimum: at one bucket per pixel the bars still render.
+              paths: uPlot.paths.bars!({ size: [0.85, 18] }),
+            }
+          : { label: s.label, stroke: STROKE, width: 1, fill: fillFor },
+      ),
     ],
     axes: [
       {
@@ -189,7 +198,11 @@ export default function TimeSeriesTile(props: {
         ticks: { stroke: '#e0e0e0', width: 1 },
       },
     ],
-    scales: { x: { time: true } },
+    // Bars read their height from the axis, so their scale has to start at
+    // zero; a line chart is free to use the full vertical space.
+    scales: props.bars
+      ? { x: { time: true }, y: { range: (_self, _min, max) => [0, max || 1] } }
+      : { x: { time: true } },
     legend: { show: props.series.length > 1 },
     cursor: {
       drag: { x: true, y: false, setScale: false },
