@@ -131,9 +131,13 @@ fn credential(user_key: &str, password_key: &str) -> Result<Option<Credential>, 
 fn parse_backup() -> Result<BackupOptions, String> {
     let enabled = env_bool("ACTA_BACKUP", false)?;
     let bucket = env_str("ACTA_S3_BUCKET", "");
+    let allow_http = env_bool("ACTA_S3_ALLOW_HTTP", false)?;
     let endpoint = std::env::var("ACTA_S3_ENDPOINT")
         .ok()
-        .filter(|value| !value.is_empty());
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(|value| s3_endpoint(&value, allow_http))
+        .transpose()?;
     // A Backblaze endpoint names its own region (`s3.<region>.backblazeb2.com`),
     // so bucket plus endpoint is enough there. Any other provider sets the region
     // explicitly, or gets the AWS default.
@@ -146,7 +150,6 @@ fn parse_backup() -> Result<BackupOptions, String> {
     };
     let prefix = env_str("ACTA_S3_PREFIX", "");
     let minute = env_parse("ACTA_BACKUP_MINUTE", 3u32)?;
-    let allow_http = env_bool("ACTA_S3_ALLOW_HTTP", false)?;
 
     if minute > 59 {
         return Err("ACTA_BACKUP_MINUTE must be between 0 and 59".into());
@@ -171,6 +174,29 @@ fn parse_backup() -> Result<BackupOptions, String> {
         minute,
         allow_http,
     })
+}
+
+/// The S3 client parses this as a URL and panics on a value it cannot read, so
+/// an unusable endpoint has to stop startup here instead. The scheme is required:
+/// providers print the bare host, and prefixing it silently is the kind of magic
+/// that hides a mistake until a request fails.
+fn s3_endpoint(endpoint: &str, allow_http: bool) -> Result<String, String> {
+    let endpoint = endpoint.trim();
+    let (scheme, rest) = match endpoint.strip_prefix("https://") {
+        Some(rest) => ("https", rest),
+        None => match endpoint.strip_prefix("http://") {
+            Some(rest) => ("http", rest),
+            None => return Err("ACTA_S3_ENDPOINT must start with http:// or https://".into()),
+        },
+    };
+    if scheme == "http" && !allow_http {
+        return Err("ACTA_S3_ENDPOINT is plain HTTP; set ACTA_S3_ALLOW_HTTP=on to allow it".into());
+    }
+    let host = rest.trim_end_matches('/');
+    if host.is_empty() {
+        return Err("ACTA_S3_ENDPOINT has no host".into());
+    }
+    Ok(format!("{scheme}://{host}"))
 }
 
 fn region_from_endpoint(endpoint: &str) -> Option<String> {

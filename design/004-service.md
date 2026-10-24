@@ -127,8 +127,9 @@ reconciles them with the existing "target exists, so trash the inputs" rule, so 
 Credentials come from `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (podman secrets); bucket, region, endpoint and
 prefix from the environment. The upload speaks the S3 protocol but is not tied to AWS: it runs against Backblaze B2,
 whose endpoint names its own region (`https://s3.<region>.backblazeb2.com`), so on B2 the bucket and the endpoint are
-all it takes and the region is read off the host. `ACTA_S3_REGION` is only needed for a provider that does not encode
-it. The `AWS_*` variable names are simply what the S3 library reads. The resolved target is logged once at startup.
+all it takes. The scheme is required — the endpoint must be a full URL, and a bare host is a startup error rather
+than something guessed at — and the region is read off the host. `ACTA_S3_REGION` is only needed for a provider that
+does not encode it. The `AWS_*` variable names are simply what the S3 library reads. The resolved target is logged once at startup.
 Uploads run in their own task and never block ingestion or compaction; a failed pass
 only logs a warning and is retried on the next one.
 
@@ -228,7 +229,7 @@ secrets, so the deploy always enables authentication.
 | `ACTA_BACKUP_MINUTE` | `3` | Minute past the hour of each pass. |
 | `ACTA_S3_BUCKET` | unset | Required when backup is on. |
 | `ACTA_S3_REGION` | derived | Read off a `s3.<region>.backblazeb2.com` endpoint; `us-east-1` otherwise. |
-| `ACTA_S3_ENDPOINT` | unset | Endpoint of the S3-compatible provider; required for Backblaze B2. |
+| `ACTA_S3_ENDPOINT` | unset | Endpoint of the S3-compatible provider, as a full `https://` URL; required for Backblaze B2. |
 | `ACTA_S3_PREFIX` | empty | Optional key prefix. |
 | `ACTA_S3_ALLOW_HTTP` | `off` | Allow a plain-HTTP endpoint (for example a local MinIO). |
 | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` | unset | Required when backup is on. |
