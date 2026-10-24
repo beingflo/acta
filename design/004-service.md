@@ -249,7 +249,8 @@ fail. Anything that needs a named zone, `current_setting('TimeZone')` or `epoch(
 
 `mise run test` runs the hurl scenarios against a running service's read API (see `design/003-visualization.md`).
 `mise run test:ingest` (`tools/simulate_ingest.py`) keeps posting realistic data for every source until interrupted,
-which exercises the whole write path including tier compaction. It targets `ACTA_URL` (default the dev server on
+including the `eos-stats` host gauges that `stats/collect.py` posts from the server, which exercises the whole write
+path including tier compaction. It targets `ACTA_URL` (default the dev server on
 `127.0.0.1:8080`); set `ACTA_AUTH=user:pass` when the target has authentication enabled. `--fast` compresses the
 cadence and `--duration` bounds the run. `--load` switches to load-test
 mode: it ramps concurrent connections until throughput plateaus or errors rise, then holds, reporting requests/s,

@@ -50,6 +50,7 @@ LAUNDRY = "humidity-laundry-room"
 BRIGHTNESS = "brightness-barometer-living-room"
 LOCATION = "location_florian"
 MARENDING = "marending"
+STATS = "eos-stats"
 
 USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
@@ -365,6 +366,144 @@ class WideEvents:
         )[0]
 
 
+class EosStats:
+    """Host gauges in the shape stats/collect.py posts them, one sample per 10 s.
+
+    The real collector derives CPU and network rates from the counters of the
+    previous sample and asks `podman stats` only every sixth sample, so the
+    container fields appear on one payload in six and carry the timestamp of the
+    sample that produced them.
+    """
+
+    HOST = "eos"
+    CORES = 8
+    MEMORY_TOTAL_MB = 16_384.0
+    DISK_TOTAL_GB = 164.0
+    BATTERY_WH = 70.0
+    CONTAINER_INTERVAL_S = 60.0
+    CONTAINERS = ["acta", "caddy", "acta-stats"]
+
+    def __init__(self, rng: random.Random):
+        self.rng = rng
+        self.booted = utc_now() - timedelta(days=rng.uniform(2, 40))
+        self.last_at: datetime | None = None
+        self.load = rng.uniform(0.05, 0.6)
+        self.temp_c = rng.uniform(42, 55)
+        self.used_mb = rng.uniform(3_500, 6_000)
+        self.used_gb = rng.uniform(60, 95)
+        self.boot_pct = rng.uniform(18, 40)
+        self.rx_kbps = rng.uniform(3, 60)
+        self.tx_kbps = rng.uniform(1, 20)
+        self.charge_pct = rng.uniform(35, 95)
+        self.charging = False
+        self.power_w = rng.uniform(6, 14)
+        # Due on the first sample, like the collector, which has no previous run.
+        self.since_containers = self.CONTAINER_INTERVAL_S
+        self.containers_at: datetime | None = None
+
+    def tick(self) -> list[dict]:
+        r = self.rng
+        now = utc_now()
+        # Rates are per elapsed second, so a `--fast` run keeps the same slope.
+        step = (now - self.last_at).total_seconds() if self.last_at else 10.0
+        self.last_at = now
+        self.since_containers += step
+
+        # CPU: a slow base load that occasionally bursts; the load averages lag
+        # behind it the way the kernel's do.
+        self.load = clamp(self.load + r.gauss(0, 0.05), 0.01, self.CORES * 0.8)
+        usage = clamp(self.load * 100 / self.CORES + r.gauss(0, 4), 0.3, 100)
+        if r.random() < 0.01:
+            usage = clamp(usage + r.uniform(15, 45), 0.3, 100)
+        self.temp_c = clamp(
+            self.temp_c + (42 + 0.4 * usage - self.temp_c) * 0.08 + r.gauss(0, 0.3),
+            28.0,
+            98.0,
+        )
+
+        self.used_mb = clamp(self.used_mb + r.gauss(0, 30), 2_000, self.MEMORY_TOTAL_MB - 200)
+        self.used_gb = clamp(self.used_gb + abs(r.gauss(0, 0.02)), 20, self.DISK_TOTAL_GB - 10)
+        self.boot_pct = clamp(self.boot_pct + abs(r.gauss(0, 0.008)), 5, 95)
+        self.rx_kbps = clamp(self.rx_kbps + r.gauss(0, 4), 0.2, 9_000)
+        self.tx_kbps = clamp(self.tx_kbps + r.gauss(0, 2.5), 0.1, 3_000)
+
+        # Battery: hours of a few watts, then a charging session. The kernel
+        # reports the magnitude in `power_now`, the direction in `status`.
+        if self.charging:
+            self.power_w = clamp(r.gauss(28, 4), 10, 45)
+            self.charge_pct = min(100.0, self.charge_pct + self.power_w * step / 3600 / self.BATTERY_WH * 100)
+            self.charging = self.charge_pct < 97
+        else:
+            self.power_w = clamp(6 + 0.15 * usage + r.gauss(0, 1), 3, 30)
+            self.charge_pct = max(0.0, self.charge_pct - self.power_w * step / 3600 / self.BATTERY_WH * 100)
+            self.charging = self.charge_pct <= 22
+
+        data = {
+            "host": self.HOST,
+            "uptime_s": int((now - self.booted).total_seconds()),
+            "cores": self.CORES,
+            "cpu": {
+                "usage_pct": round(usage, 1),
+                "load1": round(self.load, 2),
+                "load5": round(self.load * 0.9, 2),
+                "load15": round(self.load * 0.75, 2),
+            },
+            "network": {
+                "rx_kbps": round(self.rx_kbps, 1),
+                "tx_kbps": round(self.tx_kbps, 1),
+            },
+            "memory": {
+                "total_mb": self.MEMORY_TOTAL_MB,
+                "used_mb": round(self.used_mb, 1),
+                "used_pct": round(100 * self.used_mb / self.MEMORY_TOTAL_MB, 1),
+            },
+            "disk": {
+                "used_gb": round(self.used_gb, 2),
+                "used_pct": round(100 * self.used_gb / self.DISK_TOTAL_GB, 1),
+                "boot_pct": round(self.boot_pct, 1),
+            },
+            "battery": {
+                "charge_pct": round(self.charge_pct, 1),
+                "temp_c": round(30 + 0.01 * self.power_w + r.gauss(0, 0.2), 1),
+                "power_w": round(self.power_w, 1),
+                "status": "Charging" if self.charging else "Discharging",
+            },
+            "temp": {"cpu_c": round(self.temp_c, 1)},
+            "containers_at": self.containers_at.timestamp() if self.containers_at else None,
+        }
+
+        # Containers ride along once a minute, like the collector's every sixth
+        # sample. A payload without them still says when the last one was taken.
+        if self.since_containers >= self.CONTAINER_INTERVAL_S:
+            self.since_containers = 0.0
+            self.containers_at = now
+            containers = {
+                name: {
+                    "cpu_pct": round(max(0.0, r.gauss(6 if name == "acta" else 1, 3)), 1),
+                    "mem_mb": round(max(1.0, r.gauss(400 if name == "acta" else 60, 40)), 1),
+                    "mem_pct": round(clamp(r.gauss(3, 1.5), 0.1, 100), 1),
+                }
+                for name in self.CONTAINERS
+            }
+            data["containers"] = containers
+            data["containers_total"] = {
+                "cpu_pct": round(sum(entry["cpu_pct"] for entry in containers.values()), 1),
+                "mem_mb": round(sum(entry["mem_mb"] for entry in containers.values()), 1),
+                "count": len(containers),
+            }
+            data["containers_at"] = self.containers_at.timestamp()
+
+        # The collector posts when it has a sample; arriving a little late is the
+        # norm on a laptop that has just resumed.
+        return [
+            {
+                "source": STATS,
+                "timestamp": iso(now - timedelta(seconds=r.choice([0.0, 0.0, 0.0, r.uniform(0.2, 3)]))),
+                "data": data,
+            }
+        ]
+
+
 # --- transport ---------------------------------------------------------------
 
 
@@ -473,6 +612,7 @@ def build_load_bodies(rng: random.Random, batch: int, count: int) -> list[tuple[
         BrightnessBarometer(rng),
         Location(rng, 30.0),
         WideEvents(rng),
+        EosStats(rng),
     ]
     bodies = []
     for _ in range(count):
@@ -817,6 +957,7 @@ def build_sources(rng: random.Random, scale: float) -> list[tuple[str, float, ob
         (BRIGHTNESS, 60.0 * scale, BrightnessBarometer(rng)),
         (LOCATION, location_interval, Location(rng, location_interval)),
         (MARENDING, 20.0 * scale, WideEvents(rng)),
+        (STATS, 10.0 * scale, EosStats(rng)),
     ]
 
 
