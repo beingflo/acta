@@ -1,0 +1,16 @@
+# libduckdb-sys 2.0 links its statically linked extensions (`core_functions`,
+# `parquet`, `json`) from a separate `--whole-archive` library whose static
+# initializer calls `duckdb_register_static_extensions`. The definition of that
+# function lands in an object inside the libduckdb-sys rlib, which GNU ld only
+# pulls when something already needs a symbol from it — and it never rescans an
+# archive it has already passed, so the reference from the whole-archive library
+# arrives too late. Marking the symbol undefined makes ld pull the object in.
+#
+# This is a GNU-ld behaviour, so it is scoped to the Linux targets: ld64 on
+# macOS links the same crates without any help. lld handles it without the flag;
+# delete this file if the crate starts getting the order right itself.
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-Wl,--undefined=duckdb_register_static_extensions"]
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-Wl,--undefined=duckdb_register_static_extensions"]

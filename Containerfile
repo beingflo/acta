@@ -19,6 +19,9 @@ FROM rust:bookworm AS builder
 WORKDIR /usr/src/acta/service
 
 COPY service/Cargo.toml service/Cargo.lock ./
+# Target-scoped rustflags: see `.cargo/config.toml` for why the Linux link needs
+# `--undefined=duckdb_register_static_extensions`.
+COPY .cargo /usr/src/acta/.cargo
 # Prime the dependency cache with a throwaway binary, so a source-only change
 # does not invalidate the dependency layer.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
