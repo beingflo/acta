@@ -74,7 +74,7 @@ it, the arrow keys (or ctrl+j / ctrl+k) move the selection and enter opens it.
 
 The following dashboards are implemented:
 
-### Home
+### home
 
 The CO2 tile spans the full width. The other tiles are half width, two per row.
 
@@ -89,7 +89,20 @@ The CO2 tile spans the full width. The other tiles are half width, two per row.
 The tiles are fed by three sensors: `co2-sensor-living-room` (co2, temperature, humidity),
 `brightness-barometer-living-room` (lux, pressure, temperature) and `humidity-laundry-room` (humidity, temperature).
 
-### Marending
+### eos
+
+The server itself, sampled every 10 s by `stats/collect.py` — a systemd timer on the host, see
+`design/004-service.md` — into the `eos-stats` source: CPU usage and load, memory, disk per filesystem, network
+rates, battery charge and temperature, CPU temperature, and `podman stats` per container (once a minute, since that
+costs a process spawn rather than a file read).
+
+The charts show the gauges worth a line over time: CPU, CPU temperature, memory, load, the fullest filesystem,
+container CPU and memory, network in and out, battery charge and temperature. Percentages are pinned to a 0-100 y axis, so a busy hour
+and a quiet one are drawn to the same scale. Everything the collector sends beyond those charts (per container, per
+mount) is in the "Latest sample" tile, which prints the newest row of the source flattened to `path · value` rows: a
+field a collector starts sending is readable without adding a tile for it.
+
+### marending
 
 Access logs from the Caddy proxy in front of `marending.dev`, migrated as the `marending` source
 (`{ method, uri, user_agent, referrer, status, latency_ns, errors? }`). A full-width bar chart of requests per bucket
@@ -110,7 +123,7 @@ the table never blanks on the 30s tick.
 The table sheds columns as the window narrows: the error message first, then the referrer, latency and the method,
 leaving time, URI, status and user agent at phone width.
 
-### Location
+### location
 
 A single full-width and full-height tile showing a map fed by the `location_florian` data source: the position fixes
 in the selected range are plotted. They are drawn as a line joining them in time order by default; hovering the map and
@@ -170,7 +183,7 @@ As an example, the 30d button sets the selected time range to `[now - 30d, now]`
 All chart tiles that have a time axis update to reflect the selected timerange. By default the 1d option is selected.
 The frontend resolves the selection to concrete timestamps and embeds them into every tile query.
 
-The selected dashboard and range are reflected in the URL: the dashboard as a path (`/home`, `/marending`,
+The selected dashboard and range are reflected in the URL: the dashboard as a path (`/home`, `/eos`, `/marending`,
 `/location`) and the range as a query parameter, using a shorthand for presets (`?range=30d`) or ISO from/to for a
 custom range (`?from=2026-10-10T00:00:00.000Z&to=2026-10-11T00:00:00.000Z`). The URL is read on load and on back/forward;
 dashboard switches push a history entry while range changes replace the current one.

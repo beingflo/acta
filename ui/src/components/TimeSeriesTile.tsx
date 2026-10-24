@@ -60,6 +60,8 @@ export default function TimeSeriesTile(props: {
   stacked?: boolean
   /** Fill per series, for bars. */
   fills?: string[]
+  /** Fixed y bounds, for a value with a natural scale such as a percentage. */
+  yRange?: [number, number]
 }) {
   const id = props.title
   // Claimed during setup rather than when the query returns, so the summary
@@ -271,7 +273,9 @@ export default function TimeSeriesTile(props: {
           x: { time: true, range: () => xWindow },
           y: { range: (_self, _min, max) => [0, max ? max * 1.08 : 1] },
         }
-      : { x: { time: true, range: () => xWindow } },
+      : props.yRange
+        ? { x: { time: true, range: () => xWindow }, y: { range: () => props.yRange! } }
+        : { x: { time: true, range: () => xWindow } },
     legend: { show: props.series.length > 1 && !props.stacked },
     cursor: {
       drag: { x: true, y: false, setScale: false },

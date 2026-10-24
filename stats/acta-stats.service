@@ -1,0 +1,10 @@
+[Unit]
+Description=Push one sample of eos statistics into acta
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/acta-stats
+# podman stats can be slow when a container is wedged; a hung sample must not
+# hold up the next tick.
+TimeoutStartSec=30

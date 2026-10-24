@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+#MISE description="Install the eos statistics collector on the server (systemd user timer)"
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$root"
+# shellcheck source=/dev/null
+source "$root/mise-tasks/lib/env.sh"
+load_deploy_env
+
+host="${ACTA_HOST:-eos}"
+
+die() { echo "error: $*" >&2; exit 1; }
+note() { echo "==> $*"; }
+
+command -v ssh >/dev/null || die "ssh not found"
+[[ -f stats/collect.py ]] || die "stats/collect.py not found"
+
+note "installing the collector on ${host}"
+ssh "$host" 'mkdir -p "$HOME/.local/bin" "$HOME/.config/systemd/user"'
+
+# Script and units travel on stdin, so nothing is quoted into a remote shell.
+ssh "$host" 'cat > "$HOME/.local/bin/acta-stats" && chmod 755 "$HOME/.local/bin/acta-stats"' \
+    < stats/collect.py
+ssh "$host" 'cat > "$HOME/.config/systemd/user/acta-stats.service"' < stats/acta-stats.service
+ssh "$host" 'cat > "$HOME/.config/systemd/user/acta-stats.timer"' < stats/acta-stats.timer
+
+# The collector reads the credential from the podman secrets itself, so this
+# task only checks that they are there.
+note "checking the sensor podman secrets"
+for secret in acta-auth-sensor-user acta-auth-sensor-password; do
+    ssh "$host" "podman secret exists $secret" >/dev/null 2>&1 \
+        || die "podman secret $secret is missing; run: mise run deploy:secrets"
+done
+
+note "enabling the timer"
+ssh "$host" 'systemctl --user daemon-reload && systemctl --user enable --now acta-stats.timer'
+
+# A user timer only fires while the user's session exists; the acta container
+# already needs lingering enabled, so this is normally a no-op check.
+if ! ssh "$host" 'loginctl show-user "$USER" --property=Linger' | grep -q 'Linger=yes'; then
+    echo "WARN: lingering is off on ${host}; run 'loginctl enable-linger' there so the" >&2
+    echo "      timer fires while nobody is logged in" >&2
+fi
+
+# One real run now, so a broken credential or unit shows up here rather than in
+# the dashboard tomorrow.
+note "running one sample"
+ssh "$host" 'systemctl --user start acta-stats.service && journalctl --user -u acta-stats -n 5 --no-pager' \
+    || die "the sample failed; see: ssh ${host} journalctl --user -u acta-stats"
+
+if ssh "$host" '~/.local/bin/acta-stats --dry-run' | head -c 2000; then
+    echo
+fi
+
+note "installed; the timer fires every 10 s"
+echo "dashboard: /eos on the acta frontend (?range=6h to see this start)"
+echo "logs:      ssh ${host} journalctl --user -u acta-stats -f"

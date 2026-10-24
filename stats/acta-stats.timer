@@ -1,0 +1,14 @@
+[Unit]
+Description=Sample eos statistics every 10 seconds
+
+[Timer]
+# Wait for the boot to settle, then run every 10 s measured from the end of the
+# previous run, so a slow sample shortens nothing. Container figures are only
+# collected every 60 s; the collector decides that for itself.
+OnBootSec=2min
+OnUnitActiveSec=10s
+AccuracySec=1s
+Unit=acta-stats.service
+
+[Install]
+WantedBy=timers.target

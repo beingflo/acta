@@ -52,6 +52,19 @@ is atomic: the file is written to `.staging/`, synced, and renamed into `data/`,
 immediately queryable — hot data does not wait for compaction. The handler validates the batch and enqueues it; body
 size, batch length and backlog are all bounded, so a stalled writer applies backpressure instead of growing memory.
 
+### Host statistics
+
+The server's own metrics are collected outside the container, by `stats/collect.py` — installed as a systemd user
+timer by `mise run stats:install`. It reads /proc and /sys on the host, adds `podman stats` once a minute, and posts
+one row per 10 s sample to `POST /api/ingest` as `eos-stats`. Its sensor credential comes from the podman secret store:
+the collector reads it once per boot and caches it in the runtime directory, and a rejected credential makes it
+re-read and retry, so the install path never handles the password.
+
+Outside on purpose: inside the container `/proc/stat` is the host's but unscoped, `/proc/net/dev` is the container's
+own veth, other containers are invisible and the filesystem it sees is its volume. Sampling from the host gives one
+consistent view instead of a mix of scopes, keeps host access out of the service's blast radius, and lets the
+collector change without rebuilding the image. The service needs no knowledge of it beyond receiving a new source.
+
 ### Layout
 
 All files live flat in `data/` and share the schema `timestamp TIMESTAMPTZ, source VARCHAR, data VARIANT`. The
