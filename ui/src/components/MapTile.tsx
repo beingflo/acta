@@ -6,6 +6,7 @@ import { layers, namedFlavor } from '@protomaps/basemaps'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
 import { fetchData } from '../lib/api'
+import { STROKE } from '../lib/palette'
 import { locationPointsSql } from '../lib/query'
 import { range } from '../lib/range'
 
@@ -144,7 +145,7 @@ export default function MapTile() {
         type: 'line',
         source: 'location-line',
         layout: { 'line-join': 'round', 'line-cap': 'round', visibility: 'visible' },
-        paint: { 'line-color': '#2f6feb', 'line-width': 1.5, 'line-opacity': 0.7 },
+        paint: { 'line-color': STROKE, 'line-width': 1.5, 'line-opacity': 0.7 },
       })
       map.addLayer({
         id: 'location-points-layer',
@@ -153,7 +154,7 @@ export default function MapTile() {
         layout: { visibility: 'none' },
         paint: {
           'circle-radius': 2.5,
-          'circle-color': '#2f6feb',
+          'circle-color': STROKE,
           'circle-opacity': 0.55,
         },
       })

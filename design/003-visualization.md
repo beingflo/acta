@@ -17,8 +17,8 @@ The read path reads `data/*.parquet`. The file is sorted by source and then time
 every other source's row groups and each row group's Variant payload stays homogeneous enough to shred.
 
 The UI is light-mode only and deliberately minimal: white cards with hairline borders, text-only controls, centered
-tile titles, and one thin line per series with a faint wash of the same hue under the curve. Each metric has its own
-hue (temperature warm, humidity blue, …) and keeps it across dashboards, so the same quantity always reads the same.
+tile titles, and one thin line per series with a faint wash of the same hue under the curve. Every series is drawn in
+one green so the dashboards read as a family rather than a per-quantity color code.
 Hovering a tile and pressing `v` expands it to fill the viewport;
 `v`, `Escape` or the tile's × restores it.
 
@@ -87,10 +87,6 @@ The CO2 tile spans the full width. The other tiles are half width, two per row.
 The tiles are fed by three sensors: `co2-sensor-living-room` (co2, temperature, humidity),
 `brightness-barometer-living-room` (lux, pressure, temperature) and `humidity-laundry-room` (humidity, temperature).
 
-### Heuried
-
-A single full-width tile containing a visitor chart fed by the `heuried-visitors` data source. The chart has time on the X axis and visitors on the Y axis.
-
 ### Location
 
 A single full-width and full-height tile showing a map fed by the `location_florian` data source: the position fixes
@@ -142,7 +138,7 @@ As an example, the 30d button sets the selected time range to `[now - 30d, now]`
 All chart tiles that have a time axis update to reflect the selected timerange. By default the 1d option is selected.
 The frontend resolves the selection to concrete timestamps and embeds them into every tile query.
 
-The selected dashboard and range are reflected in the URL: the dashboard as a path (`/home`, `/heuried`) and the
+The selected dashboard and range are reflected in the URL: the dashboard as a path (`/home`, `/location`) and the
 range as a query parameter, using a shorthand for presets (`?range=30d`) or ISO from/to for a custom range
 (`?from=2026-10-10T00:00:00.000Z&to=2026-10-11T00:00:00.000Z`). The URL is read on load and on back/forward;
 dashboard switches push a history entry while range changes replace the current one.

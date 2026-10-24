@@ -17,43 +17,43 @@ export default function Home() {
         wide
         title="Living room CO₂"
         source={LIVING_ROOM}
-        series={[{ label: 'CO₂', expr: 'avg(data.co2::BIGINT)', metric: 'co2' }]}
+        series={[{ label: 'CO₂', expr: 'avg(data.co2::BIGINT)' }]}
         yLabel="CO₂ [ppm]"
       />
       <TimeSeriesTile
         title="Living room temperature"
         source={LIVING_ROOM}
-        series={[{ label: 'Temperature', expr: 'avg(data.temperature::DOUBLE)', metric: 'temperature' }]}
+        series={[{ label: 'Temperature', expr: 'avg(data.temperature::DOUBLE)' }]}
         yLabel="Temperature [°C]"
       />
       <TimeSeriesTile
         title="Living room brightness"
         source={BAROMETER}
-        series={[{ label: 'Brightness', expr: 'avg(data.lux::DOUBLE)', metric: 'brightness' }]}
+        series={[{ label: 'Brightness', expr: 'avg(data.lux::DOUBLE)' }]}
         yLabel="Brightness [lux]"
       />
       <TimeSeriesTile
         title="Living room humidity"
         source={LIVING_ROOM}
-        series={[{ label: 'Humidity', expr: 'avg(data.humidity::DOUBLE)', metric: 'humidity' }]}
+        series={[{ label: 'Humidity', expr: 'avg(data.humidity::DOUBLE)' }]}
         yLabel="Humidity [%]"
       />
       <TimeSeriesTile
         title="Living room pressure"
         source={BAROMETER}
-        series={[{ label: 'Pressure', expr: 'avg(data.pressure::DOUBLE)', metric: 'pressure' }]}
+        series={[{ label: 'Pressure', expr: 'avg(data.pressure::DOUBLE)' }]}
         yLabel="Pressure [hPa]"
       />
       <TimeSeriesTile
         title="Laundry room humidity"
         source={LAUNDRY_ROOM}
-        series={[{ label: 'Humidity', expr: 'avg(data.humidity::DOUBLE)', metric: 'humidity' }]}
+        series={[{ label: 'Humidity', expr: 'avg(data.humidity::DOUBLE)' }]}
         yLabel="Humidity [%]"
       />
       <TimeSeriesTile
         title="Laundry room temperature"
         source={LAUNDRY_ROOM}
-        series={[{ label: 'Temperature', expr: 'avg(data.temperature::DOUBLE)', metric: 'temperature' }]}
+        series={[{ label: 'Temperature', expr: 'avg(data.temperature::DOUBLE)' }]}
         yLabel="Temperature [°C]"
       />
     </div>

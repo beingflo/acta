@@ -1,6 +1,6 @@
 /** URL <-> state mapping.
  *
- *   /heuried                    dashboard path (`/` is Home)
+ *   /location                   dashboard path (`/` is Home)
  *   ?range=30d                  shorthand range preset
  *   ?from=2026-10-10T…&to=…     custom range (ISO, UTC)
  */

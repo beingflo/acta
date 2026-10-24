@@ -6,7 +6,7 @@ import { fetchData } from '../lib/api'
 import { exitFullscreen, fullscreenTile, setHoveredTile } from '../lib/fullscreen'
 import { formatNumber, formatTimestamp, unitOf } from '../lib/format'
 import { clearReadings, claimReadingOrder, publishReadings } from '../lib/latest'
-import { fillFor, strokeFor } from '../lib/palette'
+import { fillFor, STROKE } from '../lib/palette'
 import { bucketFor, timeSeriesSql, toAligned, type Series } from '../lib/query'
 import { dateOnlyRange, range, setCustomRange } from '../lib/range'
 
@@ -112,7 +112,7 @@ export default function TimeSeriesTile(props: {
       if (props.series.length > 1) {
         const swatch = document.createElement('span')
         swatch.className = 'chart-tooltip-swatch'
-        swatch.style.background = strokeFor(series.metric)
+        swatch.style.background = STROKE
         row.append(swatch)
       }
       const label = document.createElement('span')
@@ -170,9 +170,9 @@ export default function TimeSeriesTile(props: {
       {},
       ...props.series.map((s) => ({
         label: s.label,
-        stroke: strokeFor(s.metric),
+        stroke: STROKE,
         width: 1,
-        fill: fillFor(s.metric),
+        fill: fillFor,
       })),
     ],
     axes: [

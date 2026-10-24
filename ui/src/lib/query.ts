@@ -2,8 +2,6 @@
 
 import type uPlot from 'uplot'
 
-import type { Metric } from './palette'
-
 export type Series = {
   label: string
   /**
@@ -12,8 +10,6 @@ export type Series = {
    * silently wrong (e.g. `avg(data.temperature)` vs `avg(data.temperature::DOUBLE)`).
    */
   expr: string
-  /** Picks the series color; see `lib/palette.ts`. */
-  metric: Metric
 }
 
 const UNITS: Record<string, number> = {
