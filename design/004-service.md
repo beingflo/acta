@@ -151,9 +151,10 @@ Credentials are podman secrets: `acta-auth-ui-user`/`-password`, `acta-auth-sens
 `acta-aws-key-id` and `acta-aws-secret`, installed with `mise run deploy:secrets`. Both halves of each auth pair are
 secrets, so a username never appears in the unit either. The values are committed as ciphertext in
 `.deploy.secrets.enc`, a sops dotenv file encrypted to the age recipient in `.sops.yaml`; the private key is the
-1Password item `SOPS age key - acta`, read into a variable by the one task that needs it and never written to disk.
-The plaintext `.deploy.secrets` is gitignored and sealed by hand with sops; only the ciphertext is committed, so the
-committed file is the single source of truth for the deployed credentials.
+1Password item `SOPS age key - acta`, read into a variable by the two tasks that need it and never written to disk.
+`mise run deploy:edit-secrets` opens the ciphertext in `$EDITOR` and re-encrypts on save, so no decrypted copy is
+left behind; only the ciphertext is committed, so the committed file is the single source of truth for the deployed
+credentials. The plaintext `.deploy.secrets` is gitignored and is not part of the round trip.
 
 `mise run deploy:seed <dir>` imports a fresh dataset and refuses a volume that already holds data, printing the
 command to clear it; `mise run deploy:restore` recovers one from S3. Only one container may use the data volume at a

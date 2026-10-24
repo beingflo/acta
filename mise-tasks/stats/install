@@ -10,9 +10,6 @@ load_deploy_env
 
 host="${ACTA_HOST:-eos}"
 
-die() { echo "error: $*" >&2; exit 1; }
-note() { echo "==> $*"; }
-
 command -v ssh >/dev/null || die "ssh not found"
 [[ -f stats/collect.py ]] || die "stats/collect.py not found"
 

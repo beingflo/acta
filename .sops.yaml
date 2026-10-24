@@ -8,6 +8,10 @@
 #   sops --encrypt --input-type dotenv --output-type dotenv \
 #       .deploy.secrets > .deploy.secrets.enc
 #
+# Edit the committed ciphertext in place (no plaintext copy is left behind) with:
+#   mise run deploy:edit-secrets
+# followed by `mise run deploy:secrets` to install the values as podman secrets.
+#
 # sops resolves creation rules from the *input* path, so the rule matches the
 # gitignored plaintext `.deploy.secrets` and its encrypted counterpart.
 creation_rules:

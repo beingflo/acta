@@ -13,9 +13,6 @@ host="${ACTA_HOST:-eos}"
 dir="${1:-}"
 image=localhost/acta:current
 
-die() { echo "error: $*" >&2; exit 1; }
-note() { echo "==> $*"; }
-
 [[ -n "$dir" && -d "$dir" ]] || die "usage: mise run deploy:seed -- <directory with *.parquet>"
 count="$(find "$dir" -maxdepth 1 -name '*.parquet' | wc -l | tr -d ' ')"
 [[ "$count" -gt 0 ]] || die "no *.parquet files in ${dir}"

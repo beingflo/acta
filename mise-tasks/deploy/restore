@@ -16,8 +16,6 @@ s3_endpoint="${ACTA_S3_ENDPOINT:-}"
 s3_prefix="${ACTA_S3_PREFIX:-}"
 s3_allow_http="${ACTA_S3_ALLOW_HTTP:-off}"
 
-die() { echo "error: $*" >&2; exit 1; }
-
 [[ -n "$s3_bucket" ]] || die "ACTA_S3_BUCKET is empty; nothing to restore from"
 
 # The restore one-shot does not need auth, so only the S3 configuration and the

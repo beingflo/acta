@@ -8,9 +8,6 @@ cd "$root"
 source "$root/mise-tasks/lib/env.sh"
 load_deploy_env
 
-die() { echo "error: $*" >&2; exit 1; }
-note() { echo "==> $*"; }
-
 command -v podman >/dev/null || die "podman not found"
 podman info >/dev/null 2>&1 || die "podman machine is not running"
 

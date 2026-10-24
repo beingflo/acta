@@ -13,9 +13,6 @@ s3_bucket="${ACTA_S3_BUCKET:-}"
 tag="$(date +%Y%m%d-%H%M%S)-$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
 image="localhost/acta:${tag}"
 
-die() { echo "error: $*" >&2; exit 1; }
-note() { echo "==> $*"; }
-
 # `deploy` never holds a credential: it only checks that `deploy:secrets`
 # installed them. The values themselves live in podman.
 require_secret() {
