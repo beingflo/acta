@@ -2,21 +2,21 @@ import RequestTable from '../components/RequestTable'
 import TimeSeriesTile from '../components/TimeSeriesTile'
 
 /** Caddy's access log for marending.dev, migrated as the `marending` source. */
-const WEBSITE = 'marending'
+const SOURCE = 'marending'
 
 /** Request volume above, the requests themselves below. */
-export default function Website() {
+export default function Marending() {
   return (
-    <div class="dashboard website">
+    <div class="dashboard marending">
       <TimeSeriesTile
         bars
         wide
         title="Request volume"
-        source={WEBSITE}
+        source={SOURCE}
         series={[{ label: 'Requests', expr: 'count(*)' }]}
-        height={96}
+        height={180}
       />
-      <RequestTable source={WEBSITE} title="Requests" />
+      <RequestTable source={SOURCE} title="Requests" />
     </div>
   )
 }

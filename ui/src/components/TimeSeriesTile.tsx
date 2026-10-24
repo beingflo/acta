@@ -8,18 +8,27 @@ import { formatNumber, formatTimestamp, unitOf } from '../lib/format'
 import { clearReadings, claimReadingOrder, publishReadings } from '../lib/latest'
 import { BAR_FILL, fillFor, STROKE } from '../lib/palette'
 import { bucketFor, timeSeriesSql, toAligned, type Series } from '../lib/query'
-import { dateOnlyRange, range, setCustomRange } from '../lib/range'
+import { range, setCustomRange } from '../lib/range'
 
 const REFRESH_MS = 30_000
 const JITTER_MS = 5_000
 const AXIS_FONT = '11px ui-sans-serif, system-ui, sans-serif'
 const DEFAULT_HEIGHT = 300
+// Bars are drawn one per bucket, so they need room: a bucket per pixel would
+// render as a solid block with no gaps between the bars.
+const BAR_BUCKET_PX = 10
+// Below this much room per point a line stops being readable, so the series
+// also gets markers. Sparse windows (a few samples in a short range) would
+// otherwise show nothing at all.
+const DOT_SPACING_PX = 16
 // Header height (`--header-height`) plus the tile's own title, label and padding.
 const FULLSCREEN_CHROME = 130
 
 /** All tiles join one uPlot sync group, so the cursor is shared between them. */
 const CURSOR_SYNC = 'acta-cursor'
 
+/** uPlot's aligned data, as this tile builds it: plain arrays it can pad. */
+type Columns = [number[], ...(number | null)[][]]
 
 export default function TimeSeriesTile(props: {
   title: string
@@ -51,6 +60,10 @@ export default function TimeSeriesTile(props: {
   let requestId = 0
   const [width, setWidth] = createSignal(0)
   const [loading, setLoading] = createSignal(false)
+  // x scale bounds in seconds, and whether the series is too sparse for a bare
+  // line. Both are set per load, before the data reaches the chart.
+  let xWindow: [number, number] = [0, 1]
+  let showDots = false
 
   /** Hand one card per series to the summary strip. */
   const publish = (values: (number | null)[]) => {
@@ -141,7 +154,8 @@ export default function TimeSeriesTile(props: {
       return
     }
 
-    tooltipTime.textContent = formatTimestamp(x, dateOnlyRange())
+    const { from, to } = range()
+    tooltipTime.textContent = formatTimestamp(x, to.getTime() - from.getTime())
     const unit = unitOf(props.yLabel)
     props.series.forEach((_, index) => {
       const value = self.data[index + 1]?.[idx]
@@ -177,11 +191,21 @@ export default function TimeSeriesTile(props: {
               stroke: STROKE,
               width: 0,
               fill: BAR_FILL,
-              // 85% of the smallest x step, at most 18px, at least uPlot's 1px
-              // minimum: at one bucket per pixel the bars still render.
-              paths: uPlot.paths.bars!({ size: [0.85, 18] }),
+              // 80% of the bucket width, at most 24px: a bucket is a census of
+              // a time span, so the bar should read as that span.
+              paths: uPlot.paths.bars!({ size: [0.8, 24] }),
+              // uPlot turns point markers on by default once points are more
+              // than a few pixels apart, which would dot the top of every bar
+              // in a sparse window.
+              points: { show: false },
             }
-          : { label: s.label, stroke: STROKE, width: 1, fill: fillFor },
+          : {
+              label: s.label,
+              stroke: STROKE,
+              width: 1,
+              fill: fillFor,
+              points: { show: () => showDots, size: 4, width: 1, stroke: STROKE, fill: STROKE },
+            },
       ),
     ],
     axes: [
@@ -198,11 +222,18 @@ export default function TimeSeriesTile(props: {
         ticks: { stroke: '#e0e0e0', width: 1 },
       },
     ],
-    // Bars read their height from the axis, so their scale has to start at
-    // zero; a line chart is free to use the full vertical space.
+    // The x scale is the requested window rather than the extent of the data:
+    // a window with no rows, or one that resolves to a single point, would
+    // otherwise give a zero-width scale with no axis at all. Bars read their
+    // height from the y axis, so their scale has to start at zero, with a little
+    // headroom above the tallest bar; a line chart is free to use the full
+    // vertical space.
     scales: props.bars
-      ? { x: { time: true }, y: { range: (_self, _min, max) => [0, max || 1] } }
-      : { x: { time: true } },
+      ? {
+          x: { time: true, range: () => xWindow },
+          y: { range: (_self, _min, max) => [0, max ? max * 1.08 : 1] },
+        }
+      : { x: { time: true, range: () => xWindow } },
     legend: { show: props.series.length > 1 },
     cursor: {
       drag: { x: true, y: false, setScale: false },
@@ -242,10 +273,13 @@ export default function TimeSeriesTile(props: {
     if (!chartWidth || !chart) return
 
     const { from, to } = range()
+    // A count bucket that saw no requests is zero, not missing. Bars therefore
+    // get the complete bucket grid; a line just connects across a quiet spell.
+    const bucket = bucketFor(from, to, chartWidth, props.bars ? BAR_BUCKET_PX : 1)
     const sql = timeSeriesSql({
       source: props.source,
       series: props.series,
-      bucket: bucketFor(from, to, chartWidth),
+      bucket: bucket.sql,
       from,
       to,
     })
@@ -255,7 +289,27 @@ export default function TimeSeriesTile(props: {
     try {
       const rows = await fetchData<Array<Record<string, number | string>>>(sql)
       if (request !== requestId || !chart) return
-      const aligned = toAligned(rows ?? [], props.series.length)
+      const aligned = toAligned(
+        rows ?? [],
+        props.series.length,
+        props.bars ? { from, to, bucketMs: bucket.ms, fill: 0 } : undefined,
+      ) as Columns
+      // A single bucket has no neighbour: uPlot derives a bar's width from the
+      // gap to the next point, and a lone point draws no line. Pad the series
+      // with a second, empty bucket so the bar keeps its bucket width.
+      if (props.bars && aligned[0].length === 1) {
+        aligned[0].push(aligned[0][0] + bucket.ms / 1000)
+        for (let i = 1; i < aligned.length; i++) aligned[i].push(0)
+      }
+      const xs = aligned[0]
+      xWindow = [
+        Math.min(from.getTime() / 1000, xs[0] ?? Infinity),
+        Math.max(
+          to.getTime() / 1000,
+          props.bars && xs.length > 0 ? xs[xs.length - 1] + bucket.ms / 1000 : -Infinity,
+        ),
+      ]
+      showDots = !props.bars && xs.length > 0 && xs.length * DOT_SPACING_PX < chartWidth
       chart.setData(aligned)
       publish(newestValues(aligned))
     } catch (error) {

@@ -1,6 +1,6 @@
 /** URL <-> state mapping.
  *
- *   /location                   dashboard path (`/` is Home)
+ *   /marending                  dashboard path (`/` is Home)
  *   ?range=30d                  shorthand range preset
  *   ?from=2026-10-10T…&to=…     custom range (ISO, UTC)
  */
@@ -22,8 +22,13 @@ export function canonicalizePath(): void {
   }
 }
 
+/** Dashboard ids that have been renamed, so an older bookmark still lands on
+ *  the dashboard rather than falling back to Home. */
+const RENAMED: Record<string, string> = { website: 'marending' }
+
 export function readDashboard(): string {
-  return window.location.pathname.split('/').filter(Boolean)[0] ?? 'home'
+  const id = window.location.pathname.split('/').filter(Boolean)[0] ?? 'home'
+  return RENAMED[id] ?? id
 }
 
 export function readRange(): { preset: Preset; custom: Range | null } {

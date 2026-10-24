@@ -1,7 +1,7 @@
 import { lazy, type Component } from 'solid-js'
 
 import Home from './Home'
-import Website from './Website'
+import Marending from './Marending'
 
 // Lazy: pulls MapLibre (and its worker) into a separate chunk, loaded only when
 // the Location dashboard is opened.
@@ -15,6 +15,6 @@ export type Dashboard = {
 
 export const DASHBOARDS: Dashboard[] = [
   { id: 'home', title: 'Home', component: Home },
-  { id: 'website', title: 'Website', component: Website },
+  { id: 'marending', title: 'Marending', component: Marending },
   { id: 'location', title: 'Location', component: Location },
 ]

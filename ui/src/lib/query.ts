@@ -13,6 +13,7 @@ export type Series = {
 }
 
 const UNITS: Record<string, number> = {
+  millisecond: 1,
   second: 1_000,
   minute: 60_000,
   hour: 3_600_000,
@@ -20,6 +21,14 @@ const UNITS: Record<string, number> = {
 }
 
 const NICE: [number, keyof typeof UNITS][] = [
+  // Sub-second buckets, so a window shorter than a second still has more than
+  // one bucket to draw.
+  [10, 'millisecond'],
+  [20, 'millisecond'],
+  [50, 'millisecond'],
+  [100, 'millisecond'],
+  [200, 'millisecond'],
+  [500, 'millisecond'],
   [1, 'second'],
   [2, 'second'],
   [5, 'second'],
@@ -46,18 +55,27 @@ const NICE: [number, keyof typeof UNITS][] = [
   [365, 'day'],
 ]
 
+export type Bucket = {
+  /** SQL interval literal. */
+  sql: string
+  /** The same interval in milliseconds, for rebuilding the bucket grid. */
+  ms: number
+}
+
 /**
- * Pick a bucket width targeting roughly one point per pixel, snapped to a nice
- * interval. Keeps the response small no matter how wide the range is.
+ * Pick a bucket width targeting roughly one point per `pxPerBucket` pixels,
+ * snapped to a nice interval. Keeps the response small no matter how wide the
+ * range is, and lets bars be spaced more coarsely than a line's points.
  */
-export function bucketFor(from: Date, to: Date, widthPx: number): string {
-  const target = Math.max((to.getTime() - from.getTime()) / Math.max(widthPx, 1), 1_000)
+export function bucketFor(from: Date, to: Date, widthPx: number, pxPerBucket = 1): Bucket {
+  const points = Math.max(widthPx / pxPerBucket, 1)
+  const target = Math.max((to.getTime() - from.getTime()) / points, 1)
   let best = NICE[0]
   for (const candidate of NICE) {
     if (candidate[0] * UNITS[candidate[1]] <= target) best = candidate
     else break
   }
-  return `${best[0]} ${best[1]}s`
+  return { sql: `${best[0]} ${best[1]}s`, ms: best[0] * UNITS[best[1]] }
 }
 
 /** One query returning a single JSON array of `{ t, s0, s1, ... }` points. */
@@ -87,11 +105,22 @@ FROM (
 )`
 }
 
+export type BucketGrid = {
+  from: Date
+  to: Date
+  bucketMs: number
+  /** Value for a bucket the reply has no row for. */
+  fill: number | null
+}
+
 /** Convert `{ t, s0, ... }` rows into uPlot's column-oriented format. */
 export function toAligned(
   rows: Array<Record<string, number | string>>,
   seriesCount: number,
+  grid?: BucketGrid,
 ): uPlot.AlignedData {
+  if (grid) return onGrid(rows, seriesCount, grid)
+  // `t` is epoch seconds; uPlot expects that for a time axis.
   const timestamps = rows.map((row) => Number(row.t))
   const columns = Array.from({ length: seriesCount }, (_, i) =>
     rows.map((row) => {
@@ -100,6 +129,51 @@ export function toAligned(
     }),
   )
   return [timestamps, ...columns] as uPlot.AlignedData
+}
+
+/**
+ * Lay the reply out on every bucket of the range. A bucket with no events is
+ * absent from a `GROUP BY`, and a bar chart needs those holes filled: uPlot
+ * draws each bar up to the next point, so a missing bucket would become one
+ * absurdly wide bar instead of a gap.
+ *
+ * The grid is stepped out from a bucket the reply actually returned rather than
+ * computed from the epoch: DuckDB aligns multi-day buckets to its own origin
+ * (2000-01-01), not to midnight UTC, so guessing the alignment drops every row.
+ */
+function onGrid(
+  rows: Array<Record<string, number | string>>,
+  seriesCount: number,
+  grid: BucketGrid,
+): uPlot.AlignedData {
+  const byBucket = new Map<number, Record<string, number | string>>()
+  let first: number | null = null
+  for (const row of rows) {
+    const at = Math.round(Number(row.t) * 1000)
+    byBucket.set(at, row)
+    if (first === null || at < first) first = at
+  }
+  // No rows at all: no anchor to align to, and nothing to plot.
+  const emptyColumns = () =>
+    Array.from({ length: seriesCount }, () => [] as (number | null)[])
+  if (first === null) return [[], ...emptyColumns()] as uPlot.AlignedData
+
+  // Empty buckets on either side are real zeros, so the bars span the window
+  // the user asked for, not just the span that happened to see traffic.
+  let start = first
+  while (start - grid.bucketMs >= grid.from.getTime()) start -= grid.bucketMs
+
+  const timestamps: number[] = []
+  const values = emptyColumns()
+  for (let at = start; at < grid.to.getTime(); at += grid.bucketMs) {
+    const row = byBucket.get(at)
+    timestamps.push(at / 1000)
+    for (let i = 0; i < seriesCount; i++) {
+      const value = row?.[`s${i}`]
+      values[i].push(typeof value === 'number' ? value : grid.fill)
+    }
+  }
+  return [timestamps, ...values] as uPlot.AlignedData
 }
 
 /** Location fixes as `{ lon, lat }` pairs, in time order, for the map tile. */

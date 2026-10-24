@@ -101,11 +101,6 @@ export function range(now = new Date()): Range {
 }
 
 /** True when the selected window is wide enough that a date is context enough. */
-export function dateOnlyRange(): boolean {
-  const { from, to } = range()
-  return to.getTime() - from.getTime() > 30 * 86_400_000
-}
-
 function shift(now: Date, preset: Exclude<Preset, 'custom' | 'all'>): Date {
   const date = new Date(now)
   switch (preset) {

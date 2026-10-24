@@ -1,7 +1,10 @@
 .app {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  /* The app owns the viewport height and `main` scrolls inside it, so a
+     dashboard that fills the window does not depend on `100vh` arithmetic that
+     a wrapped header or a phone's address bar would invalidate. */
+  height: 100%;
 }
 
 .app-header {
@@ -94,13 +97,16 @@
 
 main {
   flex: 1;
-  padding: 24px;
+  min-height: 0;
+  padding: var(--main-padding);
+  overflow-y: auto;
 }
 
 .dashboard {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
+  min-width: 0;
 }
 
 .tile.wide {
@@ -108,13 +114,52 @@ main {
 }
 
 @media (max-width: 720px) {
+  :root {
+    --main-padding: 16px;
+  }
+
   .dashboard {
     grid-template-columns: 1fr;
+  }
+
+  .app-header {
+    gap: 8px;
+    padding: 0 14px;
+  }
+
+  /* The picker title truncates before the range presets do; the presets scroll
+     sideways rather than pushing the header to two rows. */
+  .dashboard-button {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 17px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .range-picker {
+    min-width: 0;
+  }
+
+  .presets {
+    gap: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .presets button {
+    height: 22px;
+    padding: 0 6px;
+    font-size: 12px;
   }
 }
 
 .tile {
   position: relative;
+  /* `min-width: 0` the whole way down to the chart: uPlot gives its root an
+     inline pixel width, which would otherwise be the min-content width of the
+     tile and pin it at its first rendered size when the window narrows. */
+  min-width: 0;
   /* Own stacking context, so a tooltip can never paint outside its own tile.
      Without it the tooltip uses the root context and floats above a maximized
      tile, which sits at z-index 5. */
@@ -168,6 +213,7 @@ body.fullscreen-tile {
 .tile-body {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   gap: 4px;
 }
 
@@ -179,6 +225,7 @@ body.fullscreen-tile {
 .tile-chart {
   position: relative;
   width: 100%;
+  min-width: 0;
 }
 
 /* Loading indicator: a single hairline arc, grey on grey. Built imperatively
@@ -293,12 +340,13 @@ body.fullscreen-tile {
   font-variant-numeric: tabular-nums;
 }
 
-/* Website dashboard: a thin request-volume strip above a table that fills the
-   rest of the viewport. */
-.dashboard.website {
+/* Marending dashboard: a request-volume bar chart above a table that fills the
+   rest of the viewport. The table keeps a floor height; a window too short for
+   both is scrolled by `main` rather than crushing the table. */
+.dashboard.marending {
   grid-template-columns: 1fr;
-  grid-template-rows: auto minmax(0, 1fr);
-  height: calc(100vh - var(--header-height) - 48px);
+  grid-template-rows: auto minmax(220px, 1fr);
+  height: 100%;
 }
 
 .tile.table {
@@ -315,6 +363,12 @@ body.fullscreen-tile {
 }
 
 .table {
+  /* One template for the header and every row, so a column can be dropped by
+     rewriting this list in a media query instead of in eight places. The URI
+     gets one share of the slack, the user agent the biggest one: a URI is
+     mostly a path, an agent string is a whole sentence. */
+  --table-columns: 96px 46px minmax(120px, 1fr) 44px 62px minmax(90px, 0.8fr)
+    minmax(160px, 1.8fr) minmax(70px, 0.7fr);
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -326,7 +380,7 @@ body.fullscreen-tile {
 .table-head,
 .table-row {
   display: grid;
-  grid-template-columns: 120px 58px minmax(160px, 1fr) 50px 72px 140px 200px 150px;
+  grid-template-columns: var(--table-columns);
   gap: 10px;
   align-items: center;
 }
@@ -380,6 +434,14 @@ body.fullscreen-tile {
   color: #555;
 }
 
+/* The day prefix goes when the column gets tight; the clock is what the table
+   is read for. */
+@media (max-width: 720px) {
+  .table-day {
+    display: none;
+  }
+}
+
 .table-method {
   color: #777;
 }
@@ -392,11 +454,73 @@ body.fullscreen-tile {
   color: #a33;
 }
 
+/* The table sheds columns as it narrows, in order of how rarely they carry
+   something: the error message is set only by handlers that logged one, the
+   referrer is mostly empty, and latency is the least useful column while
+   reading. Time, URI, status and user agent survive to the narrowest window. */
+@media (max-width: 1080px) {
+  .table {
+    --table-columns: 96px 46px minmax(120px, 1fr) 44px 62px minmax(90px, 0.8fr)
+      minmax(160px, 1.8fr);
+  }
+
+  .col-error {
+    display: none;
+  }
+}
+
+@media (max-width: 880px) {
+  .table {
+    --table-columns: 96px 46px minmax(110px, 1fr) 44px 62px minmax(140px, 1.4fr);
+  }
+
+  .col-referrer {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .table {
+    --table-columns: 88px 44px minmax(100px, 1fr) 42px minmax(130px, 1.2fr);
+  }
+
+  .col-latency {
+    display: none;
+  }
+
+  /* Narrower gutters give the columns back the space they lose. */
+  .tile {
+    padding: 14px 14px 6px;
+  }
+
+  .tile.table {
+    padding-bottom: 14px;
+  }
+}
+
+@media (max-width: 560px) {
+  .table {
+    /* Below this width the last columns may have to shrink under their content;
+       `minmax(0, …)` keeps the grid inside the tile and let ellipsis do the
+       rest, rather than pushing the user agent off the right edge. */
+    --table-columns: 72px minmax(0, 1fr) 36px minmax(0, 1.2fr);
+  }
+
+  .table-head,
+  .table-row {
+    gap: 6px;
+  }
+
+  .col-method {
+    display: none;
+  }
+}
+
 /* Full-height map dashboard. The map fills the tile edge to edge; the tile's
    border provides the frame. */
 .dashboard.map {
   grid-template-columns: 1fr;
-  height: calc(100vh - var(--header-height) - 48px);
+  height: 100%;
 }
 
 .tile.map {

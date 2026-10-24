@@ -64,7 +64,9 @@ TODO
 ## Dashboards
 
 Dashboards make up the primary interface of the visualization frontend. The active dashboard is named in the header
-picker. Each dashboard is a grid of tiles; a tile has a centered title above its chart.
+picker. Each dashboard is a grid of tiles; a tile has a centered title above its chart. The header keeps its height and
+the dashboard area below it scrolls, so a dashboard can fill the viewport (Marending, Location) or grow past it (Home)
+without relying on viewport-height arithmetic. Tiles reflow to a single column on narrow screens.
 Dashboards are hardcoded in the application, no dynamic configuration needed and no user modifiability.
 
 Dashboards can be switched by hitting cmd+k: This pops up a command-palette like selector where all available dashboards are listed. Within
@@ -87,19 +89,25 @@ The CO2 tile spans the full width. The other tiles are half width, two per row.
 The tiles are fed by three sensors: `co2-sensor-living-room` (co2, temperature, humidity),
 `brightness-barometer-living-room` (lux, pressure, temperature) and `humidity-laundry-room` (humidity, temperature).
 
-### Website
+### Marending
 
 Access logs from the Caddy proxy in front of `marending.dev`, migrated as the `marending` source
-(`{ method, uri, user_agent, referrer, status, latency_ns, errors? }`). A thin full-width bar chart of requests per
-bucket spans the top; below it a table fills the rest of the viewport with the individual requests in the same range:
-time, method, URI, status, latency, referrer, user agent and, where the handler logged one, the error message. Rows
-newest first.
+(`{ method, uri, user_agent, referrer, status, latency_ns, errors? }`). A full-width bar chart of requests per bucket
+spans the top; below it a table fills the rest of the viewport with the individual requests in the same range: time,
+method, URI, status, latency, referrer, user agent and, where the handler logged one, the error message. Rows newest
+first. A bucket that saw no requests is drawn as zero, so every bar is one bucket wide and the gaps in the chart are
+real quiet periods.
 
 The table is virtualized and paged by timestamp, because a window can hold hundreds of thousands of requests: a
-`count(*)` sizes a spacer so the scrollbar covers the whole range, and pages are fetched as "the 200 rows at or below
+`count(*)` sizes a spacer so the scrollbar covers the whole range, and pages are fetched as "the 500 rows at or below
 this instant" rather than by `OFFSET`, so a deep page costs the same as the first one. Scrolling continues from the last
 row's timestamp; jumping somewhere new bisects on the same count function (a handful of cheap count queries) to land
-within a bounded offset of the target row. Only the visible rows are in the DOM.
+within a bounded offset of the target row. Only the visible rows, plus a screenful of overscan on each side and the
+neighbouring pages, are fetched ahead of the scroll. A refresh stages the visible pages and swaps them in together, so
+the table never blanks on the 30s tick.
+
+The table sheds columns as the window narrows: the error message first, then the referrer, latency and the method,
+leaving time, URI, status and user agent at phone width.
 
 ### Location
 
@@ -139,6 +147,11 @@ Dragging horizontally selects a custom range; a short drag is ignored, so it sti
 Charts are lines by default; a tile can ask for bars instead, which is what counts per bucket want. Bars get a flat fill
 and a zero-based y axis, since a bar reads its height from the axis.
 
+Every tile aggregates into buckets sized from the selected window and the tile's width, down to 10 ms. The x axis is
+the selected window rather than the extent of the data, so a selection too short to contain a sample still shows its
+time axis, and a window holding a single point draws that point as a marker (sparse series get markers in general)
+instead of nothing at all.
+
 Chart areas and summary cards are sized before the first query returns, and a tile whose query is in flight shows a
 small spinner, so nothing shifts when the data lands. The periodic refresh is silent — only a range change or a first
 load shows the spinner.
@@ -155,9 +168,9 @@ As an example, the 30d button sets the selected time range to `[now - 30d, now]`
 All chart tiles that have a time axis update to reflect the selected timerange. By default the 1d option is selected.
 The frontend resolves the selection to concrete timestamps and embeds them into every tile query.
 
-The selected dashboard and range are reflected in the URL: the dashboard as a path (`/home`, `/location`) and the
-range as a query parameter, using a shorthand for presets (`?range=30d`) or ISO from/to for a custom range
-(`?from=2026-10-10T00:00:00.000Z&to=2026-10-11T00:00:00.000Z`). The URL is read on load and on back/forward;
+The selected dashboard and range are reflected in the URL: the dashboard as a path (`/home`, `/marending`,
+`/location`) and the range as a query parameter, using a shorthand for presets (`?range=30d`) or ISO from/to for a
+custom range (`?from=2026-10-10T00:00:00.000Z&to=2026-10-11T00:00:00.000Z`). The URL is read on load and on back/forward;
 dashboard switches push a history entry while range changes replace the current one.
 
 Relative ranges end at the wall clock, unless the data has not received a point recently, in which case they end at the

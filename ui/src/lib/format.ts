@@ -7,12 +7,17 @@ export function formatNumber(value: number): string {
   return fixed.includes('.') ? fixed.replace(/0+$/, '').replace(/\.$/, '') : fixed
 }
 
-/** Local time, matching what uPlot's time axis shows. */
-export function formatTimestamp(seconds: number, dateOnly: boolean): string {
+/** Local time, at the detail the selected window can support: a multi-year
+ *  window needs a date, a window of milliseconds needs its milliseconds. */
+export function formatTimestamp(seconds: number, spanMs: number): string {
   const date = new Date(seconds * 1000)
-  const pad = (part: number) => String(part).padStart(2, '0')
+  const pad = (part: number, digits = 2) => String(part).padStart(digits, '0')
   const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-  return dateOnly ? day : `${day} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+  if (spanMs > 30 * 86_400_000) return day
+  let clock = `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  if (spanMs <= 3_600_000) clock += `:${pad(date.getSeconds())}`
+  if (spanMs <= 2_000) clock += `.${pad(date.getMilliseconds(), 3)}`
+  return `${day} ${clock}`
 }
 
 /** The `[ppm]` part of a y-label, if it has one. */
