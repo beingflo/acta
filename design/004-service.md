@@ -170,7 +170,7 @@ Every setting is an environment variable; unset means the default. Sizes are byt
 | --- | --- | --- |
 | `ACTA_POOL_SIZE` | `4` | DuckDB connections. Each is an independent in-memory database. |
 | `ACTA_MEMORY_LIMIT` | `1GB` | DuckDB memory limit **per connection**, in DuckDB size syntax. With pool 4 the worst case is four times this. |
-| `ACTA_THREADS` | `1` | DuckDB threads per connection. |
+| `ACTA_THREADS` | `1` | DuckDB threads per connection. The biggest read-path knob: a full-range scan or a deep table page is 2-3x faster at 4 threads. Keep `POOL_SIZE × THREADS` near the core count. |
 | `ACTA_QUERY_TIMEOUT_MS` | `10000` | Per-query interrupt timeout. |
 | `ACTA_MAX_RESPONSE_BYTES` | `8388608` | Maximum JSON response size; a larger result is rejected. |
 

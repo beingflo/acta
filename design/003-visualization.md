@@ -95,9 +95,11 @@ bucket spans the top; below it a table fills the rest of the viewport with the i
 time, method, URI, status, latency, referrer, user agent and, where the handler logged one, the error message. Rows
 newest first.
 
-The table is virtualized and paged, because a window can hold hundreds of thousands of requests: a `count(*)` sizes a
-spacer so the scrollbar covers the whole range, and only the pages the visible window touches are fetched (200 rows per
-query, cached, `LIMIT`/`OFFSET`) and only the visible rows are in the DOM.
+The table is virtualized and paged by timestamp, because a window can hold hundreds of thousands of requests: a
+`count(*)` sizes a spacer so the scrollbar covers the whole range, and pages are fetched as "the 200 rows at or below
+this instant" rather than by `OFFSET`, so a deep page costs the same as the first one. Scrolling continues from the last
+row's timestamp; jumping somewhere new bisects on the same count function (a handful of cheap count queries) to land
+within a bounded offset of the target row. Only the visible rows are in the DOM.
 
 ### Location
 

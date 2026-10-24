@@ -126,8 +126,8 @@ function escape(value: string): string {
 
 /** One access-log request, as the request table renders it. */
 export type RequestRow = {
-  /** Event time, epoch seconds. */
-  t: number
+  /** Event time in microseconds since the epoch, and the table's page cursor. */
+  us: number
   method: string | null
   uri: string | null
   status: number | null
@@ -147,33 +147,52 @@ function requestWindow(source: string, from: Date, to: Date): string {
     AND timestamp <  TIMESTAMPTZ '${to.toISOString()}'`
 }
 
-/** Number of requests in the window, which sizes the table's scroll spacer. */
-export function requestCountSql(source: string, from: Date, to: Date): string {
-  return `SELECT to_json(struct_pack(n := count(*)))::VARCHAR
-FROM events
-WHERE ${requestWindow(source, from, to)}`
+/** `timestamp <= cursor`, built from the same microseconds the page query
+ *  reports back, so rows are addressed by time rather than by a scanned
+ *  offset. */
+function upTo(cursorUs: number): string {
+  return `timestamp <= CAST(make_timestamp(${Math.round(cursorUs)}) AS TIMESTAMPTZ)`
 }
 
-/** One page of the request table, newest first. Paging keeps the payload small
- *  however many requests the window holds. */
+/** Number of requests in the window, or in `[from, cursor]` when a cursor is
+ *  given. Sizes the table's scroll spacer, and drives the bisection that finds
+ *  an anchor at a given row. */
+export function requestCountSql(
+  source: string,
+  from: Date,
+  to: Date,
+  cursorUs?: number,
+): string {
+  const bound = cursorUs === undefined ? '' : `\n    AND ${upTo(cursorUs)}`
+  return `SELECT to_json(struct_pack(n := count(*)))::VARCHAR
+FROM events
+WHERE ${requestWindow(source, from, to)}${bound}`
+}
+
+/** One page of the request table, newest first, continuing at `cursorUs` when
+ *  the caller already knows where the page starts. Paging by timestamp keeps
+ *  deep pages as cheap as the first one; `offset` is only used for the few
+ *  hundred rows between a bisection result and the requested page. */
 export function requestPageSql(options: {
   source: string
   from: Date
   to: Date
   limit: number
-  offset: number
+  offset?: number
+  cursorUs?: number
 }): string {
   const { source, from, to } = options
   const limit = Math.max(1, Math.floor(options.limit))
-  const offset = Math.max(0, Math.floor(options.offset))
+  const offset = Math.max(0, Math.floor(options.offset ?? 0))
+  const cursor = options.cursorUs === undefined ? '' : `\n    AND ${upTo(options.cursorUs)}`
   // `data.errors` is a Variant array of `{ event, error }`; its text form is the
   // only useful rendering for a table cell, and null on requests without one.
   return `SELECT to_json(array_agg(struct_pack(
-           t := t, method := method, uri := uri, status := status,
+           us := us, method := method, uri := uri, status := status,
            latency := latency, referrer := referrer, agent := agent, error := error
-         ) ORDER BY t DESC))::VARCHAR
+         ) ORDER BY us DESC))::VARCHAR
 FROM (
-  SELECT epoch(CAST(timestamp AS TIMESTAMP))    AS t,
+  SELECT epoch_us(CAST(timestamp AS TIMESTAMP)) AS us,
          data.method::VARCHAR                   AS method,
          data.uri::VARCHAR                      AS uri,
          TRY_CAST(data.status AS INT)           AS status,
@@ -182,7 +201,7 @@ FROM (
          data.user_agent::VARCHAR               AS agent,
          data.errors::VARCHAR                   AS error
   FROM events
-  WHERE ${requestWindow(source, from, to)}
+  WHERE ${requestWindow(source, from, to)}${cursor}
   ORDER BY timestamp DESC
   LIMIT ${limit} OFFSET ${offset}
 )`

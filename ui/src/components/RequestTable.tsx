@@ -7,17 +7,25 @@ import { range } from '../lib/range'
 
 /** Rows per query. Pages are cached, so scrolling back costs nothing. */
 const PAGE_ROWS = 200
-/** Row height in CSS pixels, and the virtualizer's unit of measure. */
-const ROW_HEIGHT = 24
 /** Rows rendered above and below the viewport, to cover the fetch latency. */
 const OVERSCAN = 8
+/** Row height in CSS pixels, and the virtualizer's unit of measure. */
+const ROW_HEIGHT = 24
+/** How many rows we are willing to skip with `OFFSET` inside an anchor before
+ *  bisecting for a closer one instead. */
+const MAX_SKIP = 1_200
 const REFRESH_MS = 30_000
 const JITTER_MS = 5_000
 
+/** A row index whose timestamp is known, so pages near it need no offset. */
+type Anchor = { index: number; cursorUs: number | null }
+
 /**
- * Access-log table. The row count for the window comes from a `count(*)`, which
- * sizes a spacer so the scrollbar reflects the whole window while only the
- * visible page is ever fetched and only the visible rows are in the DOM.
+ * Access-log table. Rows are addressed by timestamp, not by an offset: a page
+ * is fetched as "the 200 rows at or below this instant", so page 4000 costs the
+ * same as page 1. A `count(*)` sizes a spacer for the scrollbar, and a short
+ * bisection over that same count finds an anchor when the window is jumped
+ * somewhere far from anything loaded so far.
  */
 export default function RequestTable(props: { source: string; title: string }) {
   const [total, setTotal] = createSignal<number | null>(null)
@@ -26,10 +34,12 @@ export default function RequestTable(props: { source: string; title: string }) {
   const [version, setVersion] = createSignal(0)
   const [busy, setBusy] = createSignal(false)
 
-  // A plain map plus a version signal: the cache is written from async callbacks
-  // and read while rendering, and making the map itself reactive would make the
+  // Plain state plus a version signal: the caches are written from async
+  // callbacks and read while rendering, and making them reactive would make the
   // fill effect retrigger itself.
   let cache = new Map<number, RequestRow[]>()
+  let anchors: Anchor[] = [{ index: 0, cursorUs: null }]
+  let loading = new Set<number>()
   let token = 0
   let scroller!: HTMLDivElement
 
@@ -61,35 +71,102 @@ export default function RequestTable(props: { source: string; title: string }) {
     return pages
   }
 
-  const fetchPage = async (page: number, current: number) => {
-    const { from, to } = range()
-    const rows = await fetchData<RequestRow[]>(
-      requestPageSql({ source: props.source, from, to, limit: PAGE_ROWS, offset: page * PAGE_ROWS }),
-    )
-    if (current !== token) return
-    cache.set(page, rows ?? [])
-    setVersion((n) => n + 1)
+  const nearestAnchor = (index: number): Anchor => {
+    let best: Anchor = anchors[0]
+    for (const anchor of anchors) {
+      if (anchor.index <= index && anchor.index > best.index) best = anchor
+    }
+    return best
   }
 
-  /** Fetch the pages the window needs and does not have yet. */
+  const remember = (anchor: Anchor) => {
+    if (anchors.some((known) => known.index === anchor.index)) return
+    anchors.push(anchor)
+    anchors.sort((a, b) => a.index - b.index)
+  }
+
+  /**
+   * Find an anchor close to `target` by bisecting on `count(timestamp <= t)`.
+   * Each step is one cheap count query; it stops as soon as the remaining gap
+   * can be bridged with a bounded offset, which for request logs is a couple of
+   * steps rather than the ~40 a fixed-precision search would need.
+   */
+  const bisect = async (target: number, current: number): Promise<Anchor> => {
+    const { from, to } = range()
+    let lo = from.getTime()
+    let hi = to.getTime()
+    let best: Anchor = nearestAnchor(target)
+    for (let step = 0; step < 40 && hi - lo > 1_000; step++) {
+      const mid = Math.floor((lo + hi) / 2)
+      const cursorUs = mid * 1000
+      const counts = await fetchData<{ n: number }>(
+        requestCountSql(props.source, from, to, cursorUs),
+      )
+      if (current !== token) return best
+      const n = counts?.n ?? 0
+      if (n === 0) {
+        lo = mid
+        continue
+      }
+      const index = n - 1
+      if (Math.abs(target - index) <= MAX_SKIP) return { index, cursorUs }
+      best = { index, cursorUs }
+      if (index < target) lo = mid
+      else hi = mid
+    }
+    return best
+  }
+
+  const loadPage = async (page: number, current: number) => {
+    if (cache.has(page) || loading.has(page)) return
+    loading.add(page)
+    try {
+      const start = page * PAGE_ROWS
+      let anchor = nearestAnchor(start)
+      if (start - anchor.index > MAX_SKIP) anchor = await bisect(start, current)
+      const { from, to } = range()
+      const rows = await fetchData<RequestRow[]>(
+        requestPageSql({
+          source: props.source,
+          from,
+          to,
+          limit: PAGE_ROWS,
+          offset: start - anchor.index,
+          cursorUs: anchor.cursorUs ?? undefined,
+        }),
+      )
+      if (current !== token) return
+      const pageRows = rows ?? []
+      cache.set(page, pageRows)
+      if (pageRows.length > 0) remember({ index: start, cursorUs: pageRows[0].us })
+      setVersion((n) => n + 1)
+    } catch (error) {
+      if (current === token) console.error('request table query failed', error)
+    } finally {
+      loading.delete(page)
+    }
+  }
+
+  /** Fetch the pages the window needs and does not have yet, in order, so each
+   *  page can anchor off the previous one. */
   const fillWindow = async (current: number) => {
     const missing = windowPages().filter((page) => !cache.has(page))
     if (missing.length === 0) return
     setBusy(true)
     try {
-      await Promise.all(missing.map((page) => fetchPage(page, current)))
-    } catch (error) {
-      if (current === token) console.error('request table query failed', error)
+      for (const page of missing) await loadPage(page, current)
     } finally {
       if (current === token) setBusy(false)
     }
   }
 
-  /** Re-read the window after a range change: the row count first, because it
-   *  sizes the scrollbar, then whatever the window needs. */
+  /** Re-read the window after a range change or a refresh: the row count first,
+   *  because it sizes the scrollbar, then whatever the window needs. */
   const reload = async () => {
     const current = ++token
     cache = new Map()
+    anchors = [{ index: 0, cursorUs: null }]
+    loading = new Set()
     setTotal(null)
     setVersion((n) => n + 1)
     setBusy(true)
@@ -106,8 +183,9 @@ export default function RequestTable(props: { source: string; title: string }) {
     }
   }
 
-  /** Periodic refresh, matching the charts: counts and visible pages only, so
-   *  scrolling does not jump and cached pages stay usable. */
+  /** Periodic refresh: keep the total and the scroll position, re-count, and
+   *  replace only the pages on screen. Rows are addressed by timestamp, so the
+   *  row under the cursor stays the row under the cursor. */
   const refresh = async () => {
     if (total() === null) return
     const current = token
@@ -116,7 +194,8 @@ export default function RequestTable(props: { source: string; title: string }) {
       const counts = await fetchData<{ n: number }>(requestCountSql(props.source, from, to))
       if (current !== token) return
       setTotal(counts?.n ?? 0)
-      for (const page of windowPages()) await fetchPage(page, current)
+      for (const page of windowPages()) cache.delete(page)
+      await fillWindow(current)
     } catch (error) {
       if (current === token) console.error('request table refresh failed', error)
     }
@@ -134,15 +213,13 @@ export default function RequestTable(props: { source: string; title: string }) {
   )
 
   onMount(() => {
-    if (scroller) {
-      const observer = new ResizeObserver((entries) => {
-        const next = Math.floor(entries[0].contentRect.height)
-        if (next > 0) setViewport(next)
-      })
-      observer.observe(scroller)
-      onCleanup(() => observer.disconnect())
-    }
+    const observer = new ResizeObserver((entries) => {
+      const next = Math.floor(entries[0].contentRect.height)
+      if (next > 0) setViewport(next)
+    })
+    observer.observe(scroller)
 
+    // Refresh on the charts' cadence.
     let timer = 0
     const schedule = () => {
       timer = window.setTimeout(async () => {
@@ -153,6 +230,7 @@ export default function RequestTable(props: { source: string; title: string }) {
     schedule()
 
     onCleanup(() => {
+      observer.disconnect()
       clearTimeout(timer)
       token++ // drop replies that are still in flight
     })
@@ -193,7 +271,7 @@ export default function RequestTable(props: { source: string; title: string }) {
               <For each={windowRows()}>
                 {(entry) => (
                   <div class="table-row" style={{ height: `${ROW_HEIGHT}px` }}>
-                    <span class="table-time">{formatTime(entry.row.t)}</span>
+                    <span class="table-time">{formatTime(entry.row.us)}</span>
                     <span class="table-method">{entry.row.method ?? '—'}</span>
                     <span title={entry.row.uri ?? ''}>{entry.row.uri ?? '—'}</span>
                     <span classList={{ status: true, failed: (entry.row.status ?? 0) >= 400 }}>
@@ -220,9 +298,9 @@ export default function RequestTable(props: { source: string; title: string }) {
   )
 }
 
-/** `MM-DD HH:MM:SS` in local time, matching the chart axes. */
-function formatTime(seconds: number): string {
-  const date = new Date(seconds * 1000)
+/** `MM-DD HH:MM:SS` in local time, from microseconds since the epoch. */
+function formatTime(us: number): string {
+  const date = new Date(Math.floor(us / 1000))
   const pad = (part: number) => String(part).padStart(2, '0')
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(
     date.getMinutes(),
