@@ -93,10 +93,11 @@ The tiles are fed by three sensors: `co2-sensor-living-room` (co2, temperature, 
 
 Access logs from the Caddy proxy in front of `marending.dev`, migrated as the `marending` source
 (`{ method, uri, user_agent, referrer, status, latency_ns, errors? }`). A full-width bar chart of requests per bucket
-spans the top; below it a table fills the rest of the viewport with the individual requests in the same range: time,
-method, URI, status, latency, referrer, user agent and, where the handler logged one, the error message. Rows newest
-first. A bucket that saw no requests is drawn as zero, so every bar is one bucket wide and the gaps in the chart are
-real quiet periods.
+spans the top, each bar split between what the site served and what it answered with an error (status 4xx/5xx), so a
+bucket that is half errors reads as half a red bar. Below it a table fills the rest of the viewport with the individual
+requests in the same range: time, method, URI, status, latency, referrer, user agent and, where the handler logged one,
+the error message. Rows newest first. A bucket that saw no requests is drawn as zero, so every bar is one bucket wide
+and the gaps in the chart are real quiet periods.
 
 The table is virtualized and paged by timestamp, because a window can hold hundreds of thousands of requests: a
 `count(*)` sizes a spacer so the scrollbar covers the whole range, and pages are fetched as "the 500 rows at or below
@@ -145,7 +146,8 @@ A maximized tile is the only chart on screen, so it is the only one that takes p
 Dragging horizontally selects a custom range; a short drag is ignored, so it still reads as a click.
 
 Charts are lines by default; a tile can ask for bars instead, which is what counts per bucket want. Bars get a flat fill
-and a zero-based y axis, since a bar reads its height from the axis.
+and a zero-based y axis, since a bar reads its height from the axis. A bar tile can also stack its series: a bucket is
+then one bar, and each series paints the slice between its own cumulative value and the layer below it.
 
 Every tile aggregates into buckets sized from the selected window and the tile's width, down to 10 ms. The x axis is
 the selected window rather than the extent of the data, so a selection too short to contain a sample still shows its

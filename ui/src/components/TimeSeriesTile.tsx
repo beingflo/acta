@@ -30,6 +30,22 @@ const CURSOR_SYNC = 'acta-cursor'
 /** uPlot's aligned data, as this tile builds it: plain arrays it can pad. */
 type Columns = [number[], ...(number | null)[][]]
 
+/**
+ * Cumulative columns, so each series can be drawn as one slice of a stack: the
+ * topmost total draws the whole bar, and every lower column paints only the
+ * band between itself and the layer above it.
+ */
+function stack(columns: Columns): Columns {
+  const [xs, ...layers] = columns
+  const out: Columns = [xs]
+  let below: (number | null)[] = xs.map(() => 0)
+  for (const layer of layers) {
+    below = layer.map((value, index) => (value ?? 0) + (below[index] ?? 0))
+    out.push(below)
+  }
+  return out
+}
+
 export default function TimeSeriesTile(props: {
   title: string
   source: string
@@ -39,6 +55,11 @@ export default function TimeSeriesTile(props: {
   wide?: boolean
   /** Draw bars instead of a line, for counts per bucket. */
   bars?: boolean
+  /** Stack the bars, bottom series first, so a bucket is one bar split by
+   *  series rather than one bar per series. */
+  stacked?: boolean
+  /** Fill per series, for bars. */
+  fills?: string[]
 }) {
   const id = props.title
   // Claimed during setup rather than when the query returns, so the summary
@@ -64,6 +85,13 @@ export default function TimeSeriesTile(props: {
   // line. Both are set per load, before the data reaches the chart.
   let xWindow: [number, number] = [0, 1]
   let showDots = false
+  // The values the query returned, as opposed to the stacked ones handed to
+  // uPlot: the tooltip and the cards must show each series, not its cumulative
+  // height.
+  let raw: Columns = [[]]
+
+  /** Colour that stands for a series in the tooltip and on the chart. */
+  const colorOf = (index: number) => (props.bars ? (props.fills?.[index] ?? BAR_FILL) : STROKE)
 
   /** Hand one card per series to the summary strip. */
   const publish = (values: (number | null)[]) => {
@@ -79,17 +107,15 @@ export default function TimeSeriesTile(props: {
    * Newest value of every series in the plotted data, so the card always agrees
    * with the right-hand end of the chart and costs no extra query.
    */
-  const newestValues = (aligned: uPlot.AlignedData): (number | null)[] => {
-    const columns = aligned.slice(1) as (number | null | undefined)[][]
-    return props.series.map((_, index) => {
-      const points = columns[index] ?? []
+  const newestValues = (columns: Columns): (number | null)[] =>
+    props.series.map((_, index) => {
+      const points = columns[index + 1] ?? []
       for (let at = points.length - 1; at >= 0; at--) {
         const value = points[at]
         if (typeof value === 'number' && Number.isFinite(value)) return value
       }
       return null
     })
-  }
 
   // Built imperatively, like the tooltip and for the same underlying reason:
   // uPlot owns everything inside `container`, and Solid clears the children of
@@ -121,13 +147,13 @@ export default function TimeSeriesTile(props: {
     time.className = 'chart-tooltip-time'
     box.append(time)
 
-    tooltipValues = props.series.map((series) => {
+    tooltipValues = props.series.map((series, index) => {
       const row = document.createElement('div')
       row.className = 'chart-tooltip-row'
       if (props.series.length > 1) {
         const swatch = document.createElement('span')
         swatch.className = 'chart-tooltip-swatch'
-        swatch.style.background = STROKE
+        swatch.style.background = colorOf(index)
         row.append(swatch)
       }
       const label = document.createElement('span')
@@ -158,7 +184,7 @@ export default function TimeSeriesTile(props: {
     tooltipTime.textContent = formatTimestamp(x, to.getTime() - from.getTime())
     const unit = unitOf(props.yLabel)
     props.series.forEach((_, index) => {
-      const value = self.data[index + 1]?.[idx]
+      const value = raw[index + 1]?.[idx]
       tooltipValues[index].textContent =
         typeof value === 'number' ? `${formatNumber(value)}${unit ? ` ${unit}` : ''}` : '\u2014'
     })
@@ -184,13 +210,13 @@ export default function TimeSeriesTile(props: {
     pxAlign: 0,
     series: [
       {},
-      ...props.series.map((s) =>
+      ...props.series.map((s, index) =>
         props.bars
           ? {
               label: s.label,
               stroke: STROKE,
               width: 0,
-              fill: BAR_FILL,
+              fill: colorOf(index),
               // 80% of the bucket width, at most 24px: a bucket is a census of
               // a time span, so the bar should read as that span.
               paths: uPlot.paths.bars!({ size: [0.8, 24] }),
@@ -208,6 +234,16 @@ export default function TimeSeriesTile(props: {
             },
       ),
     ],
+    // A stack is drawn as bands: the topmost cumulative column fills from zero,
+    // and every lower column paints only the slice between itself and the one
+    // above it. Its own `fill` colours that slice, so the layers keep their
+    // order — first series at the bottom — without uPlot having to know about
+    // stacking.
+    bands: props.stacked
+      ? props.series
+          .slice(1)
+          .map((_, index) => ({ series: [index + 2, index + 1] as [number, number] }))
+      : undefined,
     axes: [
       {
         stroke: '#222',
@@ -236,7 +272,7 @@ export default function TimeSeriesTile(props: {
           y: { range: (_self, _min, max) => [0, max ? max * 1.08 : 1] },
         }
       : { x: { time: true, range: () => xWindow } },
-    legend: { show: props.series.length > 1 },
+    legend: { show: props.series.length > 1 && !props.stacked },
     cursor: {
       drag: { x: true, y: false, setScale: false },
       // uPlot shares the cursor between every tile with this key. Only x means
@@ -291,7 +327,7 @@ export default function TimeSeriesTile(props: {
     try {
       const rows = await fetchData<Array<Record<string, number | string>>>(sql)
       if (request !== requestId || !chart) return
-      const aligned = toAligned(
+      const columns = toAligned(
         rows ?? [],
         props.series.length,
         props.bars ? { from, to, bucketMs: bucket.ms, fill: 0 } : undefined,
@@ -299,11 +335,12 @@ export default function TimeSeriesTile(props: {
       // A single bucket has no neighbour: uPlot derives a bar's width from the
       // gap to the next point, and a lone point draws no line. Pad the series
       // with a second, empty bucket so the bar keeps its bucket width.
-      if (props.bars && aligned[0].length === 1) {
-        aligned[0].push(aligned[0][0] + bucket.ms / 1000)
-        for (let i = 1; i < aligned.length; i++) aligned[i].push(0)
+      if (props.bars && columns[0].length === 1) {
+        columns[0].push(columns[0][0] + bucket.ms / 1000)
+        for (let i = 1; i < columns.length; i++) columns[i].push(0)
       }
-      const xs = aligned[0]
+      raw = columns
+      const xs = columns[0]
       xWindow = [
         Math.min(from.getTime() / 1000, xs[0] ?? Infinity),
         Math.max(
@@ -312,8 +349,8 @@ export default function TimeSeriesTile(props: {
         ),
       ]
       showDots = !props.bars && xs.length > 0 && xs.length * DOT_SPACING_PX < chartWidth
-      chart.setData(aligned)
-      publish(newestValues(aligned))
+      chart.setData(props.stacked ? stack(columns) : columns)
+      publish(newestValues(columns))
     } catch (error) {
       if (request === requestId) console.error(`tile "${props.title}" query failed`, error)
     } finally {
