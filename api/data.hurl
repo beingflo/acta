@@ -7,11 +7,10 @@ Content-Type: application/json
 HTTP 200
 [Asserts]
 header "Content-Type" contains "application/json"
-jsonpath "$" count == 6
+jsonpath "$" count == 5
 jsonpath "$" contains "co2-sensor-living-room"
 jsonpath "$" contains "humidity-laundry-room"
 jsonpath "$" contains "brightness-barometer-living-room"
-jsonpath "$" contains "heuried-visitors"
 jsonpath "$" contains "location_florian"
 jsonpath "$" contains "marending"
 
@@ -27,19 +26,6 @@ HTTP 200
 [Asserts]
 jsonpath "$" count == 24
 jsonpath "$[0].t" isNumber
-jsonpath "$[0].s0" isNumber
-
-###
-
-# A source whose variant payload is a bare number, not an object.
-POST {{host}}/api/data
-Content-Type: application/json
-{
-  "sql": "SELECT coalesce(to_json(array_agg(struct_pack(t := epoch(b), s0 := s0) ORDER BY b)), '[]'::JSON)::VARCHAR FROM (SELECT time_bucket(INTERVAL '1 hour', CAST(timestamp AS TIMESTAMP)) AS b, avg(data::BIGINT) AS s0 FROM events WHERE source = 'heuried-visitors' AND timestamp >= TIMESTAMPTZ '2026-10-10T00:00:00.000Z' AND timestamp < TIMESTAMPTZ '2026-10-11T00:00:00.000Z' GROUP BY 1)"
-}
-HTTP 200
-[Asserts]
-jsonpath "$" count == 24
 jsonpath "$[0].s0" isNumber
 
 ###

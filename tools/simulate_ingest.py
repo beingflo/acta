@@ -48,7 +48,6 @@ from datetime import datetime, timedelta, timezone
 CO2 = "co2-sensor-living-room"
 LAUNDRY = "humidity-laundry-room"
 BRIGHTNESS = "brightness-barometer-living-room"
-VISITORS = "heuried-visitors"
 LOCATION = "location_florian"
 MARENDING = "marending"
 
@@ -198,27 +197,6 @@ class BrightnessBarometer:
                     "temperature": round(self.temperature, 2),
                 },
             }
-        ]
-
-
-class Visitors:
-    """Heuried visitor count, a slowly moving number reported every ~10 min."""
-
-    def __init__(self, rng: random.Random):
-        self.rng = rng
-        self.value = 50.0
-
-    def tick(self) -> list[dict]:
-        r = self.rng
-        hour = utc_now().astimezone().hour
-        day = math.sin(math.pi * clamp((hour - 7) / 13.0, 0.0, 1.0)) if 7 <= hour <= 20 else 0.0
-        target = 15 + 120 * day
-        self.value += (target - self.value) * 0.15 + r.gauss(0, 4)
-        if r.random() < 0.002:  # an event
-            self.value += r.uniform(200, 1200)
-        self.value = clamp(self.value, 0, 2500)
-        return [
-            {"source": VISITORS, "timestamp": iso(utc_now()), "data": int(round(self.value))}
         ]
 
 
@@ -493,7 +471,6 @@ def build_load_bodies(rng: random.Random, batch: int, count: int) -> list[tuple[
         Co2Sensor(rng),
         LaundrySensor(rng),
         BrightnessBarometer(rng),
-        Visitors(rng),
         Location(rng, 30.0),
         WideEvents(rng),
     ]
@@ -838,7 +815,6 @@ def build_sources(rng: random.Random, scale: float) -> list[tuple[str, float, ob
         (CO2, 20.0 * scale, Co2Sensor(rng)),
         (LAUNDRY, 30.0 * scale, LaundrySensor(rng)),
         (BRIGHTNESS, 60.0 * scale, BrightnessBarometer(rng)),
-        (VISITORS, 600.0 * scale, Visitors(rng)),
         (LOCATION, location_interval, Location(rng, location_interval)),
         (MARENDING, 20.0 * scale, WideEvents(rng)),
     ]

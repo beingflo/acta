@@ -75,7 +75,6 @@ The following data sources are represented in the dataset and need to be migrate
 - co2-sensor-living-room
 - humidity-laundry-room
 - brightness-barometer-living-room
-- heuried-visitors
 - location_florian
 - marending
 
@@ -84,7 +83,6 @@ Their payload shapes:
 - `co2-sensor-living-room`: `{ co2, humidity, temperature }`
 - `humidity-laundry-room`: `{ humidity, temperature }`
 - `brightness-barometer-living-room`: `{ absolute_pressure, lux, pressure, temperature }`
-- `heuried-visitors`: a bare integer (visitor count)
 - `location_florian`: a GeoJSON Feature; position fixes plus a few `"type": "trip"` summaries
 - `marending`: `{ method, uri, user_agent, referrer, status, latency_ns, errors? }`
 

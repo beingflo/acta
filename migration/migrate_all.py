@@ -1,7 +1,9 @@
 """Run every per-source migration, then combine the results into `data/data.parquet`.
 
 Each <source>.py writes migration/out/<source>.parquet. This script runs them all
-and then writes one combined file, sorted by source and then timestamp.
+and then writes one combined file, sorted by source and then timestamp. The
+`SOURCES` list is the single source of truth: only those outputs are combined, so
+dropping a source here also drops its rows from the dataset.
 
 Sorting by source first is what makes the read path fast:
 
@@ -33,10 +35,15 @@ SOURCES = [
     "co2-sensor-living-room.py",
     "humidity-laundry-room.py",
     "brightness-barometer-living-room.py",
-    "heuried-visitors.py",
     "location_florian.py",
     "marending.py",
 ]
+
+# Combine exactly the outputs of those scripts. Globbing `out/*.parquet` would
+# also pick up the leftovers of a source that was dropped here, silently keeping
+# its rows in the dataset.
+OUTPUTS = [OUT / f"{pathlib.Path(name).stem}.parquet" for name in SOURCES]
+SOURCES_SQL = "[" + ", ".join(f"'{path}'" for path in OUTPUTS) + "]"
 
 for name in SOURCES:
     print(f"=== {name} ===", flush=True)
@@ -53,13 +60,13 @@ con.execute("SET preserve_insertion_order=true")
 con.execute(f"""
     COPY (
         SELECT timestamp, source, data
-        FROM read_parquet('{OUT}/*.parquet')
+        FROM read_parquet({SOURCES_SQL})
         ORDER BY source, timestamp
     ) TO '{FINAL}' (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE {ROW_GROUP_SIZE})
 """)
 
 # --- verification -----------------------------------------------------------
-expected = con.sql(f"SELECT count(*) FROM read_parquet('{OUT}/*.parquet')").fetchone()[0]
+expected = con.sql(f"SELECT count(*) FROM read_parquet({SOURCES_SQL})").fetchone()[0]
 rows, first, last = con.sql(
     f"SELECT count(*), min(timestamp), max(timestamp) FROM '{FINAL}'"
 ).fetchone()
