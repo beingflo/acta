@@ -147,31 +147,50 @@ def memory() -> dict:
 
 
 def disks() -> dict:
-    """Used and free space per mounted filesystem, plus the fullest one."""
-    mounts: dict[str, dict] = {}
-    fullest_pct, fullest_mount = 0.0, None
+    """Space on the filesystem behind `/`, plus `/boot`'s share.
+
+    A device mounted several times — btrfs subvolumes such as /, /home and /var —
+    is one filesystem, so its shortest mount point names it: on eos that is the
+    164 GiB btrfs every user file and every container layer lives on.
+
+    `/boot` is the one other filesystem that can fill from software (kernel
+    updates land there, and a full /boot breaks them), so its share rides along.
+    The rest of the box is virtual (tmpfs) or fixed-size (the ESP) and says
+    nothing about the disk filling up.
+    """
+    # One mount point per device; the shortest is the filesystem's name.
+    mounts: dict[str, str] = {}
     for line in (slurp("/proc/self/mounts") or "").splitlines():
         fields = line.split()
         if len(fields) < 3 or fields[2] not in FILESYSTEMS:
             continue
         mount = fields[1].replace("\\040", " ")  # spaces are escaped in mounts
+        known = mounts.get(fields[0])
+        if known is None or len(mount) < len(known):
+            mounts[fields[0]] = mount
+
+    def usage(mount: str) -> dict | None:
         try:
             stat = os.statvfs(mount)
         except OSError:
-            continue
+            return None
         total = stat.f_blocks * stat.f_frsize
         free = stat.f_bavail * stat.f_frsize  # what an unprivileged user may use
         used = total - stat.f_bfree * stat.f_frsize
-        entry = {
-            "mount": mount,
+        return {
             "used_gb": round(used / 1024**3, 2),
-            "total_gb": round(total / 1024**3, 2),
             "used_pct": percent(used, used + free),
         }
-        mounts["root" if mount == "/" else mount.strip("/").replace("/", "-")] = entry
-        if entry["used_pct"] > fullest_pct:
-            fullest_pct, fullest_mount = entry["used_pct"], mount
-    return {"mounts": mounts, "fullest_pct": fullest_pct, "fullest": fullest_mount}
+
+    root = usage("/")
+    # /boot is only its own filesystem when it is a separate mount; otherwise it
+    # is a directory on `/` and its numbers would just repeat root's.
+    boot = usage("/boot") if "/boot" in mounts.values() else None
+    return {
+        "used_gb": root["used_gb"] if root else None,
+        "used_pct": root["used_pct"] if root else None,
+        "boot_pct": boot["used_pct"] if boot else None,
+    }
 
 
 def battery() -> dict | None:

@@ -2,18 +2,17 @@
 
 import { createSignal } from 'solid-js'
 
-export type Preset = 'all' | '2y' | '1y' | '6m' | '30d' | '7d' | '1d' | '6h' | 'custom'
+export type Preset = 'all' | '1y' | '30d' | '7d' | '1d' | '6h' | '30m' | 'custom'
 export type Range = { from: Date; to: Date }
 
 export const PRESETS: { id: Exclude<Preset, 'custom'>; label: string }[] = [
   { id: 'all', label: 'all' },
-  { id: '2y', label: '2y' },
   { id: '1y', label: '1y' },
-  { id: '6m', label: '6m' },
   { id: '30d', label: '30d' },
   { id: '7d', label: '7d' },
   { id: '1d', label: '1d' },
   { id: '6h', label: '6h' },
+  { id: '30m', label: '30m' },
 ]
 
 const [preset, setPresetSignal] = createSignal<Preset>('1d')
@@ -95,7 +94,7 @@ export function range(now = new Date()): Range {
     return customRange() ?? { from: shift(end, '1d'), to: end }
   }
   if (current === 'all') {
-    return { from: earliest() ?? shift(end, '2y'), to: newest ?? end }
+    return { from: earliest() ?? shift(end, '1y'), to: newest ?? end }
   }
   return { from: shift(end, current), to: end }
 }
@@ -104,6 +103,9 @@ export function range(now = new Date()): Range {
 function shift(now: Date, preset: Exclude<Preset, 'custom' | 'all'>): Date {
   const date = new Date(now)
   switch (preset) {
+    case '30m':
+      date.setMinutes(date.getMinutes() - 30)
+      break
     case '6h':
       date.setHours(date.getHours() - 6)
       break
@@ -116,14 +118,8 @@ function shift(now: Date, preset: Exclude<Preset, 'custom' | 'all'>): Date {
     case '30d':
       date.setDate(date.getDate() - 30)
       break
-    case '6m':
-      date.setMonth(date.getMonth() - 6)
-      break
     case '1y':
       date.setFullYear(date.getFullYear() - 1)
-      break
-    case '2y':
-      date.setFullYear(date.getFullYear() - 2)
       break
   }
   return date

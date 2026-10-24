@@ -63,17 +63,21 @@ export type Bucket = {
 }
 
 /**
- * Pick a bucket width targeting roughly one point per `pxPerBucket` pixels,
- * snapped to a nice interval. Keeps the response small no matter how wide the
- * range is, and lets bars be spaced more coarsely than a line's points.
+ * Pick a bucket width for at most one point per `pxPerBucket` pixels, snapped to
+ * a nice interval. Rounded up, not down: a finer bucket would return more points
+ * than the chart has pixels, which are drawn on top of each other and cost rows
+ * for nothing. Keeps the response small no matter how wide the range is, and
+ * lets bars be spaced more coarsely than a line's points.
  */
 export function bucketFor(from: Date, to: Date, widthPx: number, pxPerBucket = 1): Bucket {
   const points = Math.max(widthPx / pxPerBucket, 1)
   const target = Math.max((to.getTime() - from.getTime()) / points, 1)
-  let best = NICE[0]
+  let best = NICE[NICE.length - 1]
   for (const candidate of NICE) {
-    if (candidate[0] * UNITS[candidate[1]] <= target) best = candidate
-    else break
+    if (candidate[0] * UNITS[candidate[1]] >= target) {
+      best = candidate
+      break
+    }
   }
   return { sql: `${best[0]} ${best[1]}s`, ms: best[0] * UNITS[best[1]] }
 }

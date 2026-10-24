@@ -45,9 +45,9 @@ export default function Eos() {
       <TimeSeriesTile
         title="Disk"
         source={SOURCE}
-        yLabel="Fullest mount [%]"
+        yLabel="Root filesystem [%]"
         yRange={[0, 100]}
-        series={[{ label: 'Disk', expr: gauge('data.disk.fullest_pct') }]}
+        series={[{ label: 'Disk', expr: gauge('data.disk.used_pct') }]}
       />
       <TimeSeriesTile
         title="Containers CPU"

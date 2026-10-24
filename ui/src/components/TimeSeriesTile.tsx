@@ -21,6 +21,11 @@ const BAR_BUCKET_PX = 10
 // also gets markers. Sparse windows (a few samples in a short range) would
 // otherwise show nothing at all.
 const DOT_SPACING_PX = 16
+// A drag shorter than this stays a click, and a finished selection is only
+// acted on once it has stopped changing: uPlot fires `setSelect` on every
+// pointer move, and each one would otherwise re-query every tile.
+const MIN_SELECTION_PX = 8
+const SELECT_SETTLE_MS = 200
 // Header height (`--header-height`) plus the tile's own title, label and padding.
 const FULLSCREEN_CHROME = 130
 
@@ -91,6 +96,7 @@ export default function TimeSeriesTile(props: {
   // uPlot: the tooltip and the cards must show each series, not its cumulative
   // height.
   let raw: Columns = [[]]
+  let selectTimer = 0
 
   /** Colour that stands for a series in the tooltip and on the chart. */
   const colorOf = (index: number) => (props.bars ? (props.fills?.[index] ?? BAR_FILL) : STROKE)
@@ -232,6 +238,12 @@ export default function TimeSeriesTile(props: {
               stroke: STROKE,
               width: 1,
               fill: fillFor,
+              // A bucket that holds no sample keeps its slot as null, and a null
+              // breaks the line. A series sampled less often than the bucket —
+              // container figures, once a minute — would disappear when zoomed
+              // in; connect across it, as uPlot already does across a bucket that
+              // has no rows at all.
+              spanGaps: true,
               points: { show: () => showDots, size: 4, width: 1, stroke: STROKE, fill: STROKE },
             },
       ),
@@ -296,18 +308,34 @@ export default function TimeSeriesTile(props: {
     },
     hooks: {
       setCursor: [(self) => updateTooltip(self)],
-      setSelect: [
-        (self) => {
-          const { left, width: selection } = self.select
-          self.setSelect({ left: 0, top: 0, width: 0, height: 0 }, false)
-          if (selection < 8) return
-          const from = new Date(self.posToVal(left, 'x') * 1000)
-          const to = new Date(self.posToVal(left + selection, 'x') * 1000)
-          if (to > from) setCustomRange({ from, to })
-        },
-      ],
+      setSelect: [(self) => settleSelection(self)],
     },
   })
+
+  /**
+   * Hand a finished drag to the shared range. `setSelect` runs on every move of
+   * the drag, so the range is only committed once the selection has been still
+   * for a moment; until then uPlot keeps drawing the selection rectangle.
+   */
+  const settleSelection = (self: uPlot) => {
+    window.clearTimeout(selectTimer)
+    // uPlot mirrors a drag into every chart in the cursor sync group, and each
+    // mirrored chart asks us to commit it too. Only the chart under the pointer
+    // owns the selection: its events carry the DOM event, the mirrors get a
+    // synthesised one.
+    if (!self.cursor.event) {
+      self.setSelect({ left: 0, top: 0, width: 0, height: 0 }, false)
+      return
+    }
+    const { left, width } = self.select
+    const from = new Date(self.posToVal(left, 'x') * 1000)
+    const to = new Date(self.posToVal(left + width, 'x') * 1000)
+    const next = width >= MIN_SELECTION_PX && to > from ? { from, to } : null
+    selectTimer = window.setTimeout(() => {
+      self.setSelect({ left: 0, top: 0, width: 0, height: 0 }, false)
+      if (next) setCustomRange(next)
+    }, SELECT_SETTLE_MS)
+  }
 
   /** `background` is the periodic refresh, which must not flash the spinner. */
   const load = async (background = false) => {
@@ -389,6 +417,7 @@ export default function TimeSeriesTile(props: {
       observer.disconnect()
       window.removeEventListener('resize', onViewportResize)
       clearTimeout(timer)
+      clearTimeout(selectTimer)
       chart?.destroy()
       chart = undefined
       clearReadings(id)

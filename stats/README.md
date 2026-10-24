@@ -24,8 +24,8 @@ All paths are relative to the row's `data` object:
 | `cpu.usage_pct` | busy time over the sample interval (null on the first run) |
 | `cpu.load1`, `load5`, `load15` | load averages |
 | `memory.total_mb`, `used_mb`, `used_pct` | RAM |
-| `disk.mounts.<key>.*` | `used_gb`, `total_gb`, `used_pct` per real filesystem |
-| `disk.fullest_pct`, `disk.fullest` | the most used filesystem, for a single chart |
+| `disk.used_gb`, `disk.used_pct` | used space and share of the filesystem behind `/` (btrfs subvolumes count as one) |
+| `disk.boot_pct` | `/boot`'s share, when it is its own filesystem |
 | `network.rx_kbps`, `tx_kbps` | rates over the interval, all interfaces but `lo` |
 | `battery.charge_pct`, `temp_c`, `power_w`, `status` | `macsmc-battery` |
 | `temp.cpu_c` | hottest CPU thermal zone, °C |
