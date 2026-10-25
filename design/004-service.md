@@ -220,7 +220,7 @@ Every setting is an environment variable; unset means the default. Sizes are byt
 | `ACTA_INGEST_MAX_BATCH` | `10000` | Rows per ingest request; larger gets `413`. |
 | `ACTA_COMPACTION_INTERVAL_MS` | `60000` | Compaction pass cadence. |
 | `ACTA_COMPACTION_GRACE_MS` | `30000` | Delay after a bucket closes before folding, so in-flight flushes land first. |
-| `ACTA_ROW_GROUP_SIZE` | `250000` | Rows per Parquet row group. |
+| `ACTA_ROW_GROUP_SIZE` | `250000` | Rows per Parquet row group. The deployed unit sets `2000000` so a closed month is one group; see `design/001-overview.md`. |
 | `ACTA_TRASH_RETENTION_MS` | `86400000` | How long superseded files stay in `.trash/`. |
 | `ACTA_TRASH_GC_INTERVAL_MS` | `600000` | Trash sweep cadence. |
 

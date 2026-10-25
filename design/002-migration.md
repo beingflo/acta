@@ -91,9 +91,10 @@ Their payload shapes:
 Partial results are written to `migration/out/<source>.parquet` and combined into `data/data.parquet`. They are
 then re-split into the same tier files the live write path produces, using the event time as the arrival time:
 `month-YYYY-MM` for closed months, `day-YYYY-MM-DD` for closed days in the open month, `hour-<epoch_s>` for closed
-hours in the open day, and `recent-`/`hot-` for the tail. Bucket boundaries are UTC, and the sort, compression and
-250k-row row groups are identical to live files. The migrated files are therefore indistinguishable from files
-written by the service, and the read path simply unions everything in `data/`.
+hours in the open day, and `recent-`/`hot-` for the tail. Bucket boundaries are UTC, and the sort and compression
+match the live writer; the read path simply unions everything in `data/`. The split used the row-group size of the
+writer at migration time, which only affects how much of a file's Variant payload is shredded (see
+`design/001-overview.md`).
 
 The output must obey the live invariants exactly:
 
@@ -108,7 +109,8 @@ archive would otherwise be returned twice by the `data/*.parquet` glob, the spli
 verified. The split is an offline step: run it before the service starts.
 
 Sorting by source first is what makes reads fast. Row-group statistics on `source` let a `source = ...` filter skip
-every other source's row groups, and keeping a source's rows contiguous keeps the Variant layout homogeneous within a
-row group so Parquet can shred it. A file interleaved by timestamp decodes roughly 10x slower per row, because every
+every other source's row groups, and a file interleaved by timestamp decodes roughly 10x slower per row, because every
 query scans (and Variant-decodes) every source. Grouping by source also compresses better: ~65 MB versus ~99 MB.
+Shredding follows a separate rule: Parquet fixes a file's Variant schema from its first row group, so a source-ordered
+file needs that group to hold every source for the whole payload to become typed columns.
 See `design/003-visualization.md`.

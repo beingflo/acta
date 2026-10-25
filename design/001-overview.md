@@ -35,8 +35,11 @@ receives another row, which is what keeps compaction append-only. The `timestamp
 range matches it.
 
 Every tier covers a disjoint span of arrival time, so each row lives in exactly one file. Within a file rows are
-sorted by source and then time; keeping a source's rows contiguous keeps each row group's Variant payload homogeneous
-enough to shred and lets row-group statistics skip other sources. All data is retained.
+sorted by source and then time, so row-group statistics on `source` let a read skip every other source's rows. Parquet
+fixes a file's Variant shredding schema from its first row group: sources missing from that group are stored in one
+opaque blob. The writer therefore uses a row group larger than a closed month, so a month file is a single group
+holding every source and all payloads become typed columns — a file that outgrows the group size would shred only the
+sources in its first group. All data is retained.
 
 ### Operation
 
