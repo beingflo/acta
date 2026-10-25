@@ -22,6 +22,22 @@ strong ETag and a short cache window — currently a world archive plus two extr
 See
 `design/003-visualization.md` for how the map uses them.
 
+## The epaper panel
+
+`GET /api/dashboard` returns the picture for the one-bit panel in the living room: a 792×272 frame, one bit per pixel,
+MSB first, 99 bytes per row — the native format of the controller `embedded-v2/dashboard` drives, which just copies the
+bytes into its paint buffer. `GET /api/dashboard.png` renders the same picture as a PNG for a browser.
+
+The picture is the living-room CO2 curve of the last six hours (one-minute buckets, padded y axis) with four scalar
+readings beside it: temperature, CO2, and the laundry and living-room humidities. All four come out of the metric
+registry with `Scope::Home`, so the panel can be handed the restricted credential and can show nothing a restricted
+viewer could not read. The device has no clock, fonts or chart library, so the service draws the whole thing; the module
+is `service/src/display.rs`.
+
+An `X-Refresh-Seconds` header tells the device when to ask again (`ACTA_DASHBOARD_REFRESH_SECONDS`), so the interval can
+be changed without opening the panel and reflashing it. A request that finds no CO2 reading in its window answers `503`
+and the panel keeps the picture it has.
+
 ## Auth
 
 Two HTTP basic credentials are configured through podman secrets. The UI credential guards the read API and the tile
@@ -47,8 +63,9 @@ either one invalidates every outstanding cookie** — including the restricted v
 that is the revocation story, and the reason a sign-out only clears the browser's copy. Refusals carry no `WWW-Authenticate`: the app owns the sign-in, and a challenge
 on a `fetch` makes browsers raise their own dialog instead — which strands clients that cannot answer a modal.
 
-**Basic credentials are read in two places only**: `/api/session`, where the dashboard trades them for the cookie, and
-the sensor's write routes (`/api/ingest`, `/api/gps/{source}`), which a machine presents on every request. Every other
+**Basic credentials are read in three places only**: `/api/session`, where the dashboard trades them for the cookie;
+the sensor's write routes (`/api/ingest`, `/api/gps/{source}`), which a machine presents on every request; and the
+epaper's `/api/dashboard` and `/api/dashboard.png`, because an ESP32 holds no cookie jar and no usable clock. Every other
 route wants the cookie — a basic header on `/api/data`, `/api/series`, `/api/me` or `/tiles/*` is simply ignored and
 answered `401`. The sensor routes answer the sensor credential only: a dashboard credential there — basic or cookie —
 gets the same `401` a wrong guess gets, so the UI password can be confirmed nowhere but `/api/session`, which is paced
@@ -73,8 +90,9 @@ curl -s -b jar -X POST -H 'Content-Type: application/json' -d '{"sql":"select 1"
 ### The restricted viewer
 
 A second pair, `ACTA_AUTH_HOME_USER`/`ACTA_AUTH_HOME_PASSWORD`, signs in with `Scope::Home`: the app shell,
-`/api/session`, `/api/me` and `/api/series` — and nothing else. `/api/data`, the tile archives and every other route
-answer `403`, and the scope is a byte inside the signed cookie, so it cannot be edited client-side.
+`/api/session`, `/api/me`, `/api/series` and the epaper's `/api/dashboard*` — and nothing else. `/api/data`, the tile
+archives and every other route answer `403`, and the scope is a byte inside the signed cookie, so it cannot be edited
+client-side.
 
 `/api/series` is the point of that split. `/api/data` takes SQL, and no inspection of arbitrary SQL makes it safe to
 expose to someone who may only see part of the data — so restricted readers never send SQL. They name a **metric**
@@ -273,6 +291,7 @@ Every setting is an environment variable; unset means the default. Sizes are byt
 | `ACTA_THREADS` | `1` | DuckDB threads per connection. The biggest read-path knob: a full-range scan or a deep table page is 2-3x faster at 4 threads. Keep `POOL_SIZE × THREADS` near the core count. |
 | `ACTA_QUERY_TIMEOUT_MS` | `10000` | Per-query interrupt timeout. |
 | `ACTA_MAX_RESPONSE_BYTES` | `8388608` | Maximum JSON response size; a larger result is rejected. |
+| `ACTA_DASHBOARD_REFRESH_SECONDS` | `120` | How long the epaper panel waits between pictures; sent to it in `X-Refresh-Seconds`. |
 
 ### Write path and compaction
 
@@ -295,7 +314,7 @@ Every setting is an environment variable; unset means the default. Sizes are byt
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `ACTA_AUTH_UI_USER` + `ACTA_AUTH_UI_PASSWORD` | unset | Enables authentication. The UI credential may reach every path. |
-| `ACTA_AUTH_HOME_USER` + `ACTA_AUTH_HOME_PASSWORD` | unset | Optional second dashboard credential, restricted to the home readings: `/api/series`, `/api/me`, `/api/session` only. |
+| `ACTA_AUTH_HOME_USER` + `ACTA_AUTH_HOME_PASSWORD` | unset | Optional second dashboard credential, restricted to the home readings: `/api/series`, `/api/me`, `/api/session` and `/api/dashboard*` only. |
 | `ACTA_AUTH_SENSOR_USER` + `ACTA_AUTH_SENSOR_PASSWORD` | unset | Optional sensor credential; may only `POST /api/ingest` and `POST /api/gps/{source}`. |
 
 Set each pair together. Setting only the sensor pair is a startup error (it would leave the UI open); with no UI

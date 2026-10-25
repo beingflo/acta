@@ -8,11 +8,12 @@
 //! `/health` stays public for the deploy script and any external probe.
 //!
 //! **Basic credentials are only read where something presents them on purpose:**
-//! the dashboard's own sign-in (`POST /api/session`) and the sensor's write
-//! routes. Every other route wants the session cookie, which keeps the surface
-//! that can be guessed against down to one endpoint — and that endpoint is paced
-//! by the throttle below. Without that narrowing, a single global failure budget
-//! would be spread across the whole API and measuring nothing.
+//! the dashboard's own sign-in (`POST /api/session`), the sensor's write routes,
+//! and the epaper panel's picture (`GET /api/dashboard*`, see `display.rs` — an
+//! ESP32 holds no cookie jar and no usable clock, so a header it sends on every
+//! request is the only thing it can authenticate with). Every other route wants
+//! the session cookie, which keeps the surface that can be guessed against down
+//! to the endpoints that need it.
 //!
 //! The GPS route additionally accepts the sensor password as an
 //! `Authorization: Bearer` token, because the Overland app can send nothing else:
@@ -228,7 +229,14 @@ impl Scope {
     fn may_reach(self, path: &str) -> bool {
         match self {
             Scope::All => true,
-            Scope::Home => matches!(path, "/api/series" | "/api/me" | "/api/session"),
+            Scope::Home => matches!(
+                path,
+                "/api/series"
+                    | "/api/me"
+                    | "/api/session"
+                    | "/api/dashboard"
+                    | "/api/dashboard.png"
+            ),
         }
     }
 }
@@ -256,6 +264,10 @@ pub async fn authorize(
     // The dashboard's own sign-in: the only place the UI credential is read off
     // the wire rather than out of a cookie.
     let sign_in = path == "/api/session";
+    // The epaper panel sends its credential as a header on every request. It is
+    // machine-issued like the sensor's, so it is not paced either: a panel that
+    // cannot sign in can only keep showing the last picture it managed to draw.
+    let display = path == "/api/dashboard" || path == "/api/dashboard.png";
     let presents_basic = request.headers().contains_key(header::AUTHORIZATION);
 
     let role = if is_gps(&request) {
@@ -267,10 +279,10 @@ pub async fn authorize(
     // dashboard request carries once the user has signed in.
     .or_else(|| session_role(&auth, request.headers()))
     // Basic credentials last, and only where a client presents them on purpose:
-    // signing in, or writing as a sensor. Everywhere else they are ignored, so
-    // the guessable surface is one endpoint instead of the whole API.
+    // signing in, writing as a sensor, or fetching the panel's picture. Everywhere
+    // else they are ignored, so the guessable surface stays narrow.
     .or_else(|| {
-        (sign_in || sensor_route)
+        (sign_in || sensor_route || display)
             .then(|| basic_credentials(request.headers()))
             .flatten()
             .and_then(|(user, password)| auth.role(&user, &password))
@@ -389,6 +401,8 @@ mod tests {
     fn only_opted_in_routes_are_open_to_a_restricted_viewer() {
         assert!(Scope::All.may_reach("/api/data"));
         assert!(Scope::Home.may_reach("/api/series"));
+        assert!(Scope::Home.may_reach("/api/dashboard"));
+        assert!(Scope::Home.may_reach("/api/dashboard.png"));
         assert!(!Scope::Home.may_reach("/api/data"));
         assert!(!Scope::Home.may_reach("/tiles/world.pmtiles"));
     }

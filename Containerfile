@@ -48,8 +48,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # --- runtime ----------------------------------------------------------------
 FROM debian:bookworm-slim AS runtime
 
+# `fontconfig` plus DejaVu are the chart's typeface: plotters resolves
+# "sans-serif" through fontconfig, and slim ships neither.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libstdc++6 \
+    && apt-get install -y --no-install-recommends ca-certificates libstdc++6 fontconfig fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app

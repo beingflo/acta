@@ -17,6 +17,7 @@ use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::auth::{self, Auth};
 use crate::db::{Db, QueryError};
+use crate::display;
 use crate::gps;
 use crate::ingest::{self, IngestHandle, IngestItem};
 use crate::metrics;
@@ -31,6 +32,8 @@ pub struct AppState {
     pub data_lock: Arc<RwLock<()>>,
     pub ingest_max_batch: usize,
     pub ingest_max_body_bytes: usize,
+    /// How long the epaper panel waits before it asks for a new picture.
+    pub dashboard_refresh_seconds: u64,
     /// Who may read, and the key that signs dashboard session cookies.
     pub auth: Auth,
 }
@@ -68,6 +71,10 @@ pub fn router(state: AppState, ui_dir: PathBuf, tiles_dir: PathBuf) -> Router {
         .route("/api/session", post(sign_in).delete(sign_out))
         .route("/api/series", post(series))
         .route("/api/me", get(me))
+        // The epaper panel pulls a rendered picture instead of drawing one: the
+        // bitmap for the device, the PNG for a browser checking a layout.
+        .route("/api/dashboard", get(display::bitmap))
+        .route("/api/dashboard.png", get(display::preview))
         .route(
             "/api/ingest",
             post(ingest).layer(DefaultBodyLimit::max(body_limit)),
@@ -281,10 +288,13 @@ async fn ingest(State(state): State<AppState>, body: Bytes) -> Response {
     (StatusCode::ACCEPTED, Json(json!({ "accepted": accepted }))).into_response()
 }
 
+#[derive(Debug)]
 pub(crate) enum ApiError {
     BadRequest(String),
     Timeout,
     TooLarge(String),
+    /// A reading the request needs is not there yet; asking again later may work.
+    Unavailable(String),
     Internal(String),
 }
 
@@ -305,6 +315,7 @@ impl IntoResponse for ApiError {
             ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
             ApiError::Timeout => (StatusCode::GATEWAY_TIMEOUT, "query timed out".to_string()),
             ApiError::TooLarge(msg) => (StatusCode::PAYLOAD_TOO_LARGE, msg),
+            ApiError::Unavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
             ApiError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
         };
         if status.is_server_error() {

@@ -4,6 +4,7 @@ mod backup;
 mod compact;
 mod config;
 mod db;
+mod display;
 mod gps;
 mod ingest;
 mod metrics;
@@ -85,6 +86,7 @@ async fn serve(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
         data_lock,
         ingest_max_batch: settings.write.ingest_max_batch,
         ingest_max_body_bytes: settings.write.ingest_max_body_bytes,
+        dashboard_refresh_seconds: settings.dashboard_refresh_seconds,
         auth: settings.auth,
     };
     let app = api::router(state, settings.ui_dir, settings.tiles_dir);

@@ -13,6 +13,9 @@ pub struct Settings {
     pub tiles_dir: PathBuf,
     pub db: DbOptions,
     pub write: WriteOptions,
+    /// How long the epaper panel waits between pictures, sent to it as a header
+    /// so the interval can be changed without reflashing the device.
+    pub dashboard_refresh_seconds: u64,
     pub auth: Auth,
     pub backup: BackupOptions,
 }
@@ -91,12 +94,18 @@ impl Settings {
         let auth = parse_auth()?;
         let backup = parse_backup()?;
 
+        let dashboard_refresh_seconds: u64 = env_parse("ACTA_DASHBOARD_REFRESH_SECONDS", 120)?;
+        if !(10..=86_400).contains(&dashboard_refresh_seconds) {
+            return Err("ACTA_DASHBOARD_REFRESH_SECONDS must be between 10 and 86400".into());
+        }
+
         Ok(Self {
             addr,
             ui_dir,
             tiles_dir,
             db,
             write,
+            dashboard_refresh_seconds,
             auth,
             backup,
         })

@@ -94,6 +94,9 @@ Unlike the other dashboards, this one writes no SQL: each tile names a metric th
 (`service/src/metrics.rs`), so the same dashboard renders for the owner and for a credential restricted to it — see the
 restricted viewer in `design/004-service.md`.
 
+The same readings are drawn onto the epaper panel in the living room by the service itself, at `/api/dashboard` — see
+`design/004-service.md`.
+
 ### acta
 
 The whole firehose: every row that enters the system, whatever its source. Above the chart a strip of scalars: data
