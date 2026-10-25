@@ -217,6 +217,14 @@ State lives in two places, neither of which a deploy touches:
 - `~/acta/tiles` — the PMTiles archives, mounted read-only. Regenerated on the host and copied with
   `mise run deploy:tiles`; the container never writes there.
 
+**The container runs unprivileged and can gain nothing.** The image declares `USER 1000:1000` and the unit adds
+`UserNS=keep-id:uid=1000,gid=1000`, so container uid 1000 *is* the deploying host user: on disk nothing changes owner,
+the data volume needs no chown, and no process inside is ever uid 0. `keep-id` is what makes that true — without it,
+uid 1000 would land on an unused subordinate id and the first flush would fail. `NoNewPrivileges=true` and
+`DropCapability=all` finish the job: the service binds 8080 and reads two directories, so it needs no capability at all.
+DuckDB's spill directory is set explicitly to `$TMPDIR/acta-duckdb` (see `db.rs`) for the same reason: the working
+directory is no longer writable by the service.
+
 Credentials are podman secrets: `acta-auth-ui-user`/`-password`, `acta-auth-home-user`/`-password` (optional — omit both
 to run without the restricted viewer), `acta-auth-sensor-user`/`-password`,
 `acta-aws-key-id` and `acta-aws-secret`, installed with `mise run deploy:secrets`. Both halves of each auth pair are

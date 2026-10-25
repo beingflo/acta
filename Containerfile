@@ -60,7 +60,14 @@ RUN mkdir -p tiles
 ENV ACTA_ADDR=0.0.0.0:8080 \
     ACTA_DATA_DIR=/data \
     ACTA_UI_DIR=/usr/src/app/ui/dist \
-    ACTA_TILES_DIR=/usr/src/app/tiles
+    ACTA_TILES_DIR=/usr/src/app/tiles \
+    HOME=/tmp
+
+# Numeric on purpose: no `/etc/passwd` entry is needed for a process that only
+# reads its own files, and nothing here wants a login shell. The quadlet runs
+# with `UserNS=keep-id:uid=1000,gid=1000`, so uid 1000 *is* the deploying user on
+# the host — which is who already owns the data volume.
+USER 1000:1000
 
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/acta"]

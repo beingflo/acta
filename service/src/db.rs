@@ -188,8 +188,16 @@ fn connect(options: &DbOptions) -> Result<Connection, String> {
     // with an autoload error before anything else runs.
     let dir = options.data_dir.display().to_string().replace('\'', "''");
     let glob = options.glob_pattern().replace('\'', "''");
+    // Spilling must not land in the working directory: the container runs as an
+    // unprivileged user and cannot write there. It goes to the system temp dir,
+    // which therefore has to be allowed as well — external access is off below.
+    let temp_dir = std::env::temp_dir().join("acta-duckdb");
+    std::fs::create_dir_all(&temp_dir)
+        .map_err(|error| format!("cannot create temp dir {}: {error}", temp_dir.display()))?;
+    let temp = temp_dir.display().to_string().replace('\'', "''");
     let setup = format!(
-        "SET allowed_directories = ['{dir}'];\n\
+        "SET allowed_directories = ['{dir}', '{temp}'];\n\
+         SET temp_directory = '{temp}';\n\
          SET enable_external_access = false;\n\
          SET lock_configuration = true;\n\
          CREATE VIEW events AS \

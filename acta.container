@@ -13,6 +13,18 @@ PublishPort=127.0.0.1:8080:8080
 # S3 keys) are podman secrets, so they never appear in the unit or the image.
 Volume=acta-data:/data
 Volume=%h/acta/tiles:/usr/src/app/tiles:ro,Z
+
+# Run as the deploying user, and as nobody else: `keep-id` maps the host user to
+# container uid 1000, which is the uid the image declares. Everything already on
+# the volume was created by root-in-the-userns, i.e. by that same host user, so
+# the switch renames nothing on disk and needs no chown. Without `keep-id`, uid
+# 1000 would land on an unused subordinate id and the first flush would fail.
+User=1000:1000
+UserNS=keep-id:uid=1000,gid=1000
+# It binds 8080 and reads two directories; it needs no capability at all, and
+# nothing it execs may gain one.
+NoNewPrivileges=true
+DropCapability=all
 __CONFIG__
 
 Secret=acta-auth-ui-user,type=env,target=ACTA_AUTH_UI_USER
