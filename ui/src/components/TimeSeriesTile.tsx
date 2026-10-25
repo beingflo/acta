@@ -13,6 +13,35 @@ import { autoRefresh } from '../lib/refresh'
 
 const AXIS_FONT = '11px ui-sans-serif, system-ui, sans-serif'
 const DEFAULT_HEIGHT = 300
+
+// uPlot reserves a flat 50px for every axis, whatever its labels need; these
+// three numbers turn that into the room the labels actually take: the tick
+// marks, the gap between a tick and its label, and one line of 11px text. A
+// short chart spends a fifth of its height on that flat reservation.
+const AXIS_TICK = 10
+const AXIS_GAP = 5
+const AXIS_LINE = 13
+
+/** Width of a piece of text in the axis font, for sizing the y axis. */
+const measure = (() => {
+  let context: CanvasRenderingContext2D | null | undefined
+  return (text: string) => {
+    if (context === undefined) {
+      context = document.createElement('canvas').getContext('2d')
+      if (context) context.font = AXIS_FONT
+    }
+    if (!context) return 0
+    context.font = AXIS_FONT
+    return context.measureText(text).width
+  }
+})()
+
+/** Room for `rows` lines of tick label, plus the ticks themselves. */
+const tickRoom = (rows: number) => AXIS_TICK + AXIS_GAP + rows * AXIS_LINE
+
+/** Rows a set of labels needs: a tick that starts a day or a year gets two. */
+const rowsOf = (values: (string | null)[] | null) =>
+  values?.reduce((rows, value) => Math.max(rows, String(value ?? '').split('\n').length), 1) ?? 1
 // Bars are drawn one per bucket, so they need room: a bucket per pixel would
 // render as a solid block with no gaps between the bars.
 const BAR_BUCKET_PX = 10
@@ -25,8 +54,9 @@ const DOT_SPACING_PX = 16
 // pointer move, and each one would otherwise re-query every tile.
 const MIN_SELECTION_PX = 8
 const SELECT_SETTLE_MS = 200
-// Header height (`--header-height`) plus the tile's own title, label and padding.
-const FULLSCREEN_CHROME = 130
+// Header height (`--header-height`) plus the tile's own title, label and padding:
+// 50 + 10 + 17 + 8 + 15 + 2 + 6, the tile's chrome as `App.css` sets it.
+const FULLSCREEN_CHROME = 108
 
 /** All tiles join one uPlot sync group, so the cursor is shared between them. */
 const CURSOR_SYNC = 'acta-cursor'
@@ -220,6 +250,12 @@ export default function TimeSeriesTile(props: {
     width: chartWidth,
     height: height(),
     pxAlign: 0,
+    // uPlot pads the top and right edges of every chart by half its default
+    // axis width (25px each) so an axis label cannot be clipped, even when
+    // there is no top or right axis. Both are too generous here: the top needs
+    // half a line of text so a tick at the very top of a fixed scale is whole,
+    // and the right needs room for the last marker or half a bar.
+    padding: [8, 6, 0, 0],
     series: [
       {},
       ...props.series.map((s, index) =>
@@ -270,12 +306,18 @@ export default function TimeSeriesTile(props: {
         ticks: { stroke: '#e0e0e0', width: 1 },
         // uPlot's own day/month/year ticks are month-first.
         values: (_self, splits, _axisIdx, _space, spacing) => axisTickLabels(splits, spacing),
+        // Sized to the tallest label rather than uPlot's flat 50px: a rollover
+        // tick carries a second line, the rest only one.
+        size: (_self, values) => tickRoom(rowsOf(values)),
       },
       {
         stroke: '#222',
         font: AXIS_FONT,
         grid: { stroke: '#f0f0f0', width: 1 },
         ticks: { stroke: '#e0e0e0', width: 1 },
+        // As wide as the widest value it has to print, not a fixed 50px.
+        size: (_self, values) =>
+          tickRoom(1) + Math.max(0, ...(values ?? []).map((value) => measure(String(value ?? '')))),
       },
     ],
     // The x scale is the requested window rather than the extent of the data:
@@ -287,7 +329,7 @@ export default function TimeSeriesTile(props: {
     scales: props.bars
       ? {
           x: { time: true, range: () => xWindow },
-          y: { range: (_self, _min, max) => [0, max ? max * 1.08 : 1] },
+          y: { range: (_self, _min, max) => [0, max ? max * 1.03 : 1] },
         }
       : props.yRange
         ? { x: { time: true, range: () => xWindow }, y: { range: () => props.yRange! } }

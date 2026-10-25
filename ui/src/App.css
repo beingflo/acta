@@ -124,7 +124,7 @@ main {
 .dashboard {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
+  gap: 14px;
   min-width: 0;
 }
 
@@ -134,7 +134,7 @@ main {
 
 @media (max-width: 720px) {
   :root {
-    --main-padding: 16px;
+    --main-padding: 12px;
   }
 
   .dashboard {
@@ -183,7 +183,7 @@ main {
      Without it the tooltip uses the root context and floats above a maximized
      tile, which sits at z-index 5. */
   z-index: 0;
-  padding: 18px 20px 8px;
+  padding: 10px 14px 6px;
   background: #fff;
   border: 1px solid #c9c9c9;
   border-radius: 4px;
@@ -201,7 +201,7 @@ main {
   border: 0;
   border-radius: 0;
   box-shadow: none;
-  padding: 18px 24px 8px;
+  padding: 10px 16px 6px;
   overflow: hidden;
 }
 
@@ -223,7 +223,7 @@ body.fullscreen-tile {
 }
 
 .tile-title {
-  margin-bottom: 16px;
+  margin-bottom: 8px;
   font-size: 13px;
   font-weight: 500;
   text-align: center;
@@ -241,7 +241,7 @@ body.fullscreen-tile {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  gap: 4px;
+  gap: 2px;
 }
 
 .tile-ylabel {
@@ -283,7 +283,7 @@ body.fullscreen-tile {
   grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
 .latest-card {
@@ -389,7 +389,7 @@ body.fullscreen-tile {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding-bottom: 18px;
+  padding-bottom: 10px;
   overflow: hidden;
 }
 
@@ -599,13 +599,37 @@ body.fullscreen-tile {
     --table-columns: 88px minmax(110px, 160px) minmax(0, 1fr);
   }
 
-  /* Narrower gutters give the columns back the space they lose. */
-  .tile {
-    padding: 14px 14px 6px;
+  /* Stacked in one column, a frame around each tile draws a box for no
+     reason: the border, its padding and its shadow only take width away from
+     the chart. They go, and a hairline between tiles does the separating. */
+  .dashboard {
+    gap: 0;
   }
 
+  .tile,
   .tile.table {
-    padding-bottom: 14px;
+    padding: 0 0 14px;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .tile + .tile {
+    padding-top: 14px;
+    border-top: 1px solid #eeeeee;
+  }
+
+  /* A maximized tile leaves the flow and covers the viewport, so it keeps its
+     own padding and takes no separating line. */
+  .tile.fullscreen {
+    padding: 10px 12px 6px;
+    border-top: 0;
+  }
+
+  /* The summary strip is cards rather than a tile, so the collapse of the grid
+     gap leaves the first chart tight under it. */
+  .latest-strip {
+    margin-bottom: 14px;
   }
 }
 

@@ -1,7 +1,7 @@
 :root {
   color-scheme: light;
   --header-height: 50px;
-  --main-padding: 24px;
+  --main-padding: 16px;
   font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   color: #1a1a1a;
   background: #ffffff;
