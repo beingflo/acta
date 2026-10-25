@@ -1,8 +1,13 @@
 import { createEffect, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
 
-import { DASHBOARDS } from '../dashboards'
+import type { Dashboard } from '../dashboards'
 
-export default function DashboardPicker(props: { active: string; onSelect: (id: string) => void }) {
+export default function DashboardPicker(props: {
+  active: string
+  onSelect: (id: string) => void
+  /** The dashboards this credential may open — see `scope` in `lib/session`. */
+  dashboards: Dashboard[]
+}) {
   const [open, setOpen] = createSignal(false)
   const [query, setQuery] = createSignal('')
   const [highlight, setHighlight] = createSignal(0)
@@ -10,12 +15,12 @@ export default function DashboardPicker(props: { active: string; onSelect: (id: 
   let listRef: HTMLDivElement | undefined
 
   const filtered = () =>
-    DASHBOARDS.filter((dashboard) => dashboard.title.toLowerCase().includes(query().toLowerCase()))
+    props.dashboards.filter((dashboard) => dashboard.title.toLowerCase().includes(query().toLowerCase()))
 
   const openPalette = () => {
     setQuery('')
     // Start on the current dashboard rather than the top of the list.
-    const index = DASHBOARDS.findIndex((dashboard) => dashboard.id === props.active)
+    const index = props.dashboards.findIndex((dashboard) => dashboard.id === props.active)
     setHighlight(index >= 0 ? index : 0)
     setOpen(true)
   }
@@ -82,7 +87,7 @@ export default function DashboardPicker(props: { active: string; onSelect: (id: 
   return (
     <>
       <button class="dashboard-button" onClick={openPalette}>
-        {DASHBOARDS.find((dashboard) => dashboard.id === props.active)?.title ?? 'Dashboard'}
+        {props.dashboards.find((dashboard) => dashboard.id === props.active)?.title ?? 'Dashboard'}
       </button>
       {open() && (
         <div class="palette-backdrop" onClick={() => setOpen(false)}>

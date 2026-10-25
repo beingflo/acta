@@ -42,12 +42,30 @@ arrived over TLS, valid for **two months**. `DELETE /api/session` clears it.
 
 The cookie holds a signed claim rather than an identifier: `expiry ‖ nonce`, with an HMAC-SHA256 tag over it. Nothing is
 stored server-side, so a restart costs nobody a login, and no lookup happens per request — one `ring::hmac` verify
-(~0.1 µs) sits in the middleware, before the basic-credential check. The signing key is derived from the UI password, so
-**rotating that password invalidates every outstanding cookie**; that is the revocation story, and the reason a
-sign-out only clears the browser's copy. Refusals carry no `WWW-Authenticate`: the app owns the sign-in, and a challenge
+(~0.1 µs) sits in the middleware, before the basic-credential check. The signing key is derived from both dashboard passwords, so **rotating
+either one invalidates every outstanding cookie** — including the restricted viewer's when their password is withdrawn;
+that is the revocation story, and the reason a sign-out only clears the browser's copy. Refusals carry no `WWW-Authenticate`: the app owns the sign-in, and a challenge
 on a `fetch` makes browsers raise their own dialog instead — which strands clients that cannot answer a modal.
 
 Basic auth is still accepted on every path, so `curl`, the hurl scenarios and the deploy scripts are unaffected.
+
+### The restricted viewer
+
+A second pair, `ACTA_AUTH_HOME_USER`/`ACTA_AUTH_HOME_PASSWORD`, signs in with `Scope::Home`: the app shell,
+`/api/session`, `/api/me` and `/api/series` — and nothing else. `/api/data`, the tile archives and every other route
+answer `403`, and the scope is a byte inside the signed cookie, so it cannot be edited client-side.
+
+`/api/series` is the point of that split. `/api/data` takes SQL, and no inspection of arbitrary SQL makes it safe to
+expose to someone who may only see part of the data — so restricted readers never send SQL. They name a **metric**
+(`service/src/metrics.rs`), which is a hand-written definition of one reading: its single source, its aggregate, and
+whether a restricted viewer may ask for it (opt-in per metric, so a new one is closed by default). The service builds the
+SQL, and the whole request surface is a metric id, a window and a bucket width — validated, then re-rendered, so nothing
+the caller typed reaches the query. A metric a viewer may not read answers exactly like one that does not exist.
+
+The home dashboard is written entirely in metrics, so both credentials render it through the same endpoint; the other
+dashboards still use `/api/data` and are the owner's alone. `/api/me` returns the scope so the picker offers a restricted
+viewer one dashboard, but that is presentation: enforcement is the scope check and the metric registry, and typing
+`/eos` by hand lands on the home dashboard with nothing to read.
 
 ## Health
 
@@ -180,7 +198,8 @@ State lives in two places, neither of which a deploy touches:
 - `~/acta/tiles` — the PMTiles archives, mounted read-only. Regenerated on the host and copied with
   `mise run deploy:tiles`; the container never writes there.
 
-Credentials are podman secrets: `acta-auth-ui-user`/`-password`, `acta-auth-sensor-user`/`-password`,
+Credentials are podman secrets: `acta-auth-ui-user`/`-password`, `acta-auth-home-user`/`-password` (optional — omit both
+to run without the restricted viewer), `acta-auth-sensor-user`/`-password`,
 `acta-aws-key-id` and `acta-aws-secret`, installed with `mise run deploy:secrets`. Both halves of each auth pair are
 secrets, so a username never appears in the unit either. The values are committed as ciphertext in
 `.deploy.secrets.enc`, a sops dotenv file encrypted to the age recipient in `.sops.yaml`; the private key is the
@@ -247,6 +266,7 @@ Every setting is an environment variable; unset means the default. Sizes are byt
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `ACTA_AUTH_UI_USER` + `ACTA_AUTH_UI_PASSWORD` | unset | Enables authentication. The UI credential may reach every path. |
+| `ACTA_AUTH_HOME_USER` + `ACTA_AUTH_HOME_PASSWORD` | unset | Optional second dashboard credential, restricted to the home readings: `/api/series`, `/api/me`, `/api/session` only. |
 | `ACTA_AUTH_SENSOR_USER` + `ACTA_AUTH_SENSOR_PASSWORD` | unset | Optional sensor credential; may only `POST /api/ingest` and `POST /api/gps/{source}`. |
 
 Set each pair together. Setting only the sensor pair is a startup error (it would leave the UI open); with no UI

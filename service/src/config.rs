@@ -107,13 +107,16 @@ impl Settings {
 /// and, if present, may only reach `POST /api/ingest`.
 fn parse_auth() -> Result<Auth, String> {
     let ui = credential("ACTA_AUTH_UI_USER", "ACTA_AUTH_UI_PASSWORD")?;
+    let home = credential("ACTA_AUTH_HOME_USER", "ACTA_AUTH_HOME_PASSWORD")?;
     let sensor = credential("ACTA_AUTH_SENSOR_USER", "ACTA_AUTH_SENSOR_PASSWORD")?;
-    if ui.is_none() && sensor.is_some() {
+    if ui.is_none() && (home.is_some() || sensor.is_some()) {
         return Err(
-            "ACTA_AUTH_SENSOR_* is set without ACTA_AUTH_UI_*; refusing to leave the UI open".into(),
+            "ACTA_AUTH_HOME_* or ACTA_AUTH_SENSOR_* is set without ACTA_AUTH_UI_*; refusing to \
+             serve data with authentication off"
+                .into(),
         );
     }
-    Ok(Auth::new(ui, sensor))
+    Ok(Auth::new(ui, home, sensor))
 }
 
 fn credential(user_key: &str, password_key: &str) -> Result<Option<Credential>, String> {

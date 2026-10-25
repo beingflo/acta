@@ -27,6 +27,15 @@ require_secret acta-auth-ui-user
 require_secret acta-auth-ui-password
 require_secret acta-auth-sensor-user
 require_secret acta-auth-sensor-password
+# The restricted dashboard credential is optional: present only if someone ran
+# `mise run deploy:secrets` with ACTA_AUTH_HOME_* set. The secrets live on the
+# host, like the ones `require_secret` checks.
+if ssh "$host" 'podman secret exists acta-auth-home-user' >/dev/null 2>&1 &&
+    ssh "$host" 'podman secret exists acta-auth-home-password' >/dev/null 2>&1; then
+    home_auth=on
+else
+    home_auth=off
+fi
 if [[ -n "$s3_bucket" ]]; then
     require_secret acta-aws-key-id
     require_secret acta-aws-secret
@@ -93,11 +102,13 @@ done
 config="${config%$'\n'}"
 
 note "installing acta.container (${tag})"
-if [[ -n "$s3_bucket" ]]; then
-    sed "s|__TAG__|${tag}|g" acta.container
-else
-    sed -e "s|__TAG__|${tag}|g" -e '/type=env,target=AWS_/d' acta.container
-fi | CONFIG="$config" awk '{ if ($0 == "__CONFIG__") print ENVIRON["CONFIG"]; else print }' \
+# Drop the mounts this deployment does not have secrets for, so the unit never
+# names a secret that is missing (which would keep the container from starting).
+sed_args=(-e "s|__TAG__|${tag}|g")
+[[ -n "$s3_bucket" ]] || sed_args+=(-e '/type=env,target=AWS_/d')
+[[ "$home_auth" == on ]] || sed_args+=(-e '/target=ACTA_AUTH_HOME_/d')
+sed "${sed_args[@]}" acta.container \
+  | CONFIG="$config" awk '{ if ($0 == "__CONFIG__") print ENVIRON["CONFIG"]; else print }' \
   | ssh "$host" 'mkdir -p "$HOME/.config/containers/systemd" && cat > "$HOME/.config/containers/systemd/acta.container"'
 
 # Drop the env file written by older deploys; it is no longer referenced.

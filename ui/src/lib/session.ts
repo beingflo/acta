@@ -16,7 +16,26 @@ import { createSignal } from 'solid-js'
 /** True once an API call has been refused for want of a session. */
 const [signInRequired, setSignInRequired] = createSignal(false)
 
-export { signInRequired }
+/** What this credential may read: the owner's everything, or the home readings. */
+const [scope, setScope] = createSignal<'all' | 'home'>('all')
+
+export { scope, signInRequired }
+
+/**
+ * Ask the service what this credential may read, so the picker offers only the
+ * dashboards it can fill. The restriction itself lives on the server — this is
+ * presentation, and a wrong answer here cannot widen anything.
+ */
+export async function loadScope(): Promise<void> {
+  const response = await fetch('/api/me')
+  if (response.status === 401) {
+    requireSignIn()
+    return
+  }
+  if (!response.ok) return
+  const body = (await response.json()) as { scope?: string }
+  setScope(body.scope === 'home' ? 'home' : 'all')
+}
 
 /** A 401: no cookie, or one past its two months. */
 export class Unauthorized extends Error {
@@ -42,6 +61,7 @@ export async function signIn(user: string, password: string): Promise<void> {
   })
   if (response.ok) {
     setSignInRequired(false)
+    await loadScope()
     return
   }
   throw new Error(

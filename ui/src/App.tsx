@@ -5,8 +5,9 @@ import DashboardPicker from './components/DashboardPicker'
 import LiveIndicator from './components/LiveIndicator'
 import RangePicker from './components/RangePicker'
 import SignIn from './components/SignIn'
-import { DASHBOARDS } from './dashboards'
+import { DASHBOARDS, type Dashboard } from './dashboards'
 import { fetchData } from './lib/api'
+import { loadScope, scope } from './lib/session'
 import { fullscreenTile, installFullscreenShortcuts } from './lib/fullscreen'
 import { customRange, installRangeShortcuts, preset, setDataBounds } from './lib/range'
 import { installRefreshShortcut, refreshTick } from './lib/refresh'
@@ -14,8 +15,17 @@ import { applyRangeFromUrl, dashboardPath, rangeQuery, readDashboard, writeUrl }
 import './App.css'
 
 export default function App() {
+  // A restricted viewer gets the dashboards marked `shared`; the owner gets all
+  // of them. The service decides what either may read, this only picks what is
+  // worth showing.
+  const allowed = (): Dashboard[] =>
+    scope() === 'all' ? DASHBOARDS : DASHBOARDS.filter((dashboard) => dashboard.shared)
+  const knownDashboard = (id: string): string => {
+    const list = allowed()
+    return list.some((dashboard) => dashboard.id === id) ? id : list[0].id
+  }
   const [active, setActive] = createSignal(knownDashboard(readDashboard()))
-  const current = () => DASHBOARDS.find((dashboard) => dashboard.id === active()) ?? DASHBOARDS[0]
+  const current = () => allowed().find((dashboard) => dashboard.id === active()) ?? allowed()[0]
 
   const syncFromUrl = () =>
     batch(() => {
@@ -23,11 +33,17 @@ export default function App() {
       applyRangeFromUrl()
     })
 
-  /** The data extents, which only the `all` range reads. */
+  /**
+   * The data extents, which only the `all` range reads. This is the one query
+   * the owner's credential needs and a restricted viewer's does not have — it
+   * spans every source — so a restricted viewer simply does without it.
+   */
   const refreshBounds = () =>
-    void fetchData<{ mn: number; mx: number }>(
-      'SELECT to_json(struct_pack(mn := epoch(CAST(min(timestamp) AS TIMESTAMP)), mx := epoch(CAST(max(timestamp) AS TIMESTAMP))))::VARCHAR FROM events',
-    )
+    scope() !== 'all'
+      ? undefined
+      : void fetchData<{ mn: number; mx: number }>(
+          'SELECT to_json(struct_pack(mn := epoch(CAST(min(timestamp) AS TIMESTAMP)), mx := epoch(CAST(max(timestamp) AS TIMESTAMP))))::VARCHAR FROM events',
+        )
       .then((bounds) => {
         if (bounds && Number.isFinite(bounds.mn) && Number.isFinite(bounds.mx)) {
           setDataBounds(new Date(bounds.mn * 1000), new Date(bounds.mx * 1000))
@@ -36,6 +52,12 @@ export default function App() {
       .catch((error) => console.warn('could not determine the data time bounds', error))
 
   onMount(() => {
+    void loadScope().then(() => {
+      // The URL may name a dashboard this credential cannot open.
+      if (scope() !== 'all') setActive(knownDashboard(readDashboard()))
+      refreshBounds()
+    })
+
     window.addEventListener('popstate', syncFromUrl)
     onCleanup(() => window.removeEventListener('popstate', syncFromUrl))
 
@@ -48,7 +70,6 @@ export default function App() {
     const uninstallRefresh = installRefreshShortcut()
     onCleanup(uninstallRefresh)
 
-    refreshBounds()
     // Only `all` depends on the extents; a hidden tab can miss data, so pick
     // them up again on return rather than on a timer.
     const onVisible = () => {
@@ -111,7 +132,7 @@ export default function App() {
   return (
     <div class="app">
       <header class="app-header">
-        <DashboardPicker active={active()} onSelect={setActive} />
+        <DashboardPicker active={active()} onSelect={setActive} dashboards={allowed()} />
         <div class="spacer" />
         <LiveIndicator />
         <RangePicker />
@@ -122,8 +143,4 @@ export default function App() {
       <SignIn />
     </div>
   )
-}
-
-function knownDashboard(id: string): string {
-  return DASHBOARDS.some((dashboard) => dashboard.id === id) ? id : DASHBOARDS[0].id
 }

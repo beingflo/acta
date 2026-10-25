@@ -90,6 +90,10 @@ The CO2 tile spans the full width. The other tiles are half width, two per row.
 The tiles are fed by three sensors: `co2-sensor-living-room` (co2, temperature, humidity),
 `brightness-barometer-living-room` (lux, pressure, temperature) and `humidity-laundry-room` (humidity, temperature).
 
+Unlike the other dashboards, this one writes no SQL: each tile names a metric the service defines
+(`service/src/metrics.rs`), so the same dashboard renders for the owner and for a credential restricted to it — see the
+restricted viewer in `design/004-service.md`.
+
 ### acta
 
 The whole firehose: every row that enters the system, whatever its source. Above the chart a strip of scalars: data

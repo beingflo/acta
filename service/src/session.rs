@@ -16,6 +16,8 @@ use chrono::{DateTime, Utc};
 use ring::hmac;
 use ring::rand::{SecureRandom, SystemRandom};
 
+use crate::auth::Scope;
+
 /// Two months: long enough that a phone stops asking, short enough that a lost
 /// device stops working on its own.
 pub const LIFETIME_SECONDS: i64 = 60 * 24 * 60 * 60;
@@ -27,10 +29,14 @@ pub const COOKIE_NAME: &str = "acta_session";
 /// to sign with the same password does not verify here.
 const CONTEXT: &[u8] = b"acta-session-v1";
 
-/// Bytes of `expiry` that lead the payload, and the nonce that follows: two
-/// cookies minted in the same second must not be the same string.
+/// The payload is a scope byte, the expiry, then a nonce — the nonce keeps two
+/// cookies minted in the same second distinct. The scope is inside the signed
+/// claim rather than in a separate cookie, so a restricted viewer cannot edit
+/// their own reach.
+const SCOPE_BYTES: usize = 1;
 const EXPIRY_BYTES: usize = 8;
 const NONCE_BYTES: usize = 12;
+const PAYLOAD_BYTES: usize = SCOPE_BYTES + EXPIRY_BYTES + NONCE_BYTES;
 
 /// Signs and checks session tokens. One instance for the life of the process.
 #[derive(Clone)]
@@ -62,8 +68,9 @@ impl Sessions {
 
     /// A cookie value for a new session, or `None` when the system has no
     /// entropy to draw a nonce from.
-    pub fn issue(&self, now: DateTime<Utc>) -> Option<String> {
-        let mut payload = Vec::with_capacity(EXPIRY_BYTES + NONCE_BYTES);
+    pub fn issue(&self, scope: Scope, now: DateTime<Utc>) -> Option<String> {
+        let mut payload = Vec::with_capacity(PAYLOAD_BYTES);
+        payload.push(scope.byte());
         payload.extend_from_slice(&(now.timestamp() + LIFETIME_SECONDS).to_be_bytes());
         let mut nonce = [0u8; NONCE_BYTES];
         self.rng.fill(&mut nonce).ok()?;
@@ -78,21 +85,22 @@ impl Sessions {
         ))
     }
 
-    /// Whether a cookie value is one this process signed and has not expired.
-    /// `ring::hmac::verify` compares the tag in constant time.
-    pub fn verify(&self, token: &str, now: DateTime<Utc>) -> bool {
+    /// The scope a cookie value was signed for, if this process signed it and it
+    /// has not expired. `ring::hmac::verify` compares the tag in constant time.
+    pub fn verify(&self, token: &str, now: DateTime<Utc>) -> Option<Scope> {
         let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD;
-        let Some((payload, tag)) = token.split_once('.') else {
-            return false;
-        };
-        let (Ok(payload), Ok(tag)) = (encoded.decode(payload), encoded.decode(tag)) else {
-            return false;
-        };
-        if payload.len() != EXPIRY_BYTES + NONCE_BYTES || hmac::verify(&self.key, &payload, &tag).is_err() {
-            return false;
+        let (payload, tag) = token.split_once('.')?;
+        let (payload, tag) = (encoded.decode(payload).ok()?, encoded.decode(tag).ok()?);
+        if payload.len() != PAYLOAD_BYTES || hmac::verify(&self.key, &payload, &tag).is_err() {
+            return None;
         }
-        let expiry = i64::from_be_bytes(payload[..EXPIRY_BYTES].try_into().expect("eight bytes"));
-        expiry > now.timestamp()
+        let scope = Scope::from_byte(payload[0])?;
+        let expiry = i64::from_be_bytes(
+            payload[SCOPE_BYTES..SCOPE_BYTES + EXPIRY_BYTES]
+                .try_into()
+                .expect("eight bytes"),
+        );
+        (expiry > now.timestamp()).then_some(scope)
     }
 }
 
@@ -143,19 +151,22 @@ mod tests {
     fn a_fresh_token_verifies_and_expires() {
         let sessions = Sessions::new("correct horse");
         let now = Utc::now();
-        let token = sessions.issue(now).expect("entropy");
+        let token = sessions.issue(Scope::Home, now).expect("entropy");
 
-        assert!(sessions.verify(&token, now));
-        assert!(sessions.verify(&token, now + chrono::Duration::days(59)));
-        assert!(!sessions.verify(&token, now + chrono::Duration::days(61)));
+        assert_eq!(sessions.verify(&token, now), Some(Scope::Home));
+        assert_eq!(
+            sessions.verify(&token, now + chrono::Duration::days(59)),
+            Some(Scope::Home)
+        );
+        assert_eq!(sessions.verify(&token, now + chrono::Duration::days(61)), None);
     }
 
     #[test]
     fn tokens_are_short_and_differ() {
         let sessions = Sessions::new("correct horse");
         let now = Utc::now();
-        let first = sessions.issue(now).expect("entropy");
-        let second = sessions.issue(now).expect("entropy");
+        let first = sessions.issue(Scope::All, now).expect("entropy");
+        let second = sessions.issue(Scope::All, now).expect("entropy");
 
         assert_ne!(first, second, "the nonce keeps two cookies apart");
         assert!(first.len() < 96, "a cookie header should stay small");
@@ -165,16 +176,16 @@ mod tests {
     fn tampering_and_other_passwords_fail() {
         let sessions = Sessions::new("correct horse");
         let now = Utc::now();
-        let token = sessions.issue(now).expect("entropy");
+        let token = sessions.issue(Scope::All, now).expect("entropy");
 
         let mut flipped = token.clone().into_bytes();
         let last = flipped.len() - 1;
         flipped[last] = if flipped[last] == b'A' { b'B' } else { b'A' };
-        assert!(!sessions.verify(&String::from_utf8(flipped).unwrap(), now));
+        assert_eq!(sessions.verify(&String::from_utf8(flipped).unwrap(), now), None);
 
-        assert!(!Sessions::new("battery staple").verify(&token, now));
-        assert!(!sessions.verify("nonsense", now));
-        assert!(!sessions.verify("", now));
+        assert_eq!(Sessions::new("battery staple").verify(&token, now), None);
+        assert_eq!(sessions.verify("nonsense", now), None);
+        assert_eq!(sessions.verify("", now), None);
     }
 
     #[test]

@@ -2,7 +2,7 @@ import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 
-import { fetchData } from '../lib/api'
+import { fetchData, fetchSeries } from '../lib/api'
 import { exitFullscreen, fullscreenTile, setHoveredTile } from '../lib/fullscreen'
 import ExpandButton from './ExpandButton'
 import { axisTickLabels, formatBucket, formatNumber, formatTimestamp, unitOf } from '../lib/format'
@@ -105,7 +105,16 @@ export default function TimeSeriesTile(props: {
   title: string
   /** Omit to aggregate every source, as the acta dashboard does. */
   source?: string
-  series: Series[]
+  /** The SQL the owner's credential may write. Omit when `metric` is given. */
+  series?: Series[]
+  /**
+   * A reading the service defines (`service/src/metrics.rs`), for dashboards a
+   * restricted viewer may open: the tile then asks `/api/series` and never sends
+   * SQL of its own.
+   */
+  metric?: string
+  /** The legend and tooltip name for a `metric` tile. */
+  label?: string
   yLabel?: string
   height?: number
   wide?: boolean
@@ -119,6 +128,13 @@ export default function TimeSeriesTile(props: {
   /** Fixed y bounds, for a value with a natural scale such as a percentage. */
   yRange?: [number, number]
 }) {
+  // A metric tile has exactly one series; a SQL tile has as many as it was
+  // given. Everything below reads `series()` rather than the prop.
+  const series = (): Series[] =>
+    props.metric
+      ? [{ label: props.label ?? props.title, expr: props.metric }]
+      : (props.series ?? [])
+
   const id = props.title
   // Claimed during setup rather than when the query returns, so the summary
   // strip lists the charts in dashboard order, not reply order.
@@ -162,7 +178,7 @@ export default function TimeSeriesTile(props: {
     publishReadings(
       id,
       order,
-      props.series.map((_, index) => ({ title: props.title, unit, value: values[index] ?? null })),
+      series().map((_, index) => ({ title: props.title, unit, value: values[index] ?? null })),
     )
   }
 
@@ -171,7 +187,7 @@ export default function TimeSeriesTile(props: {
    * with the right-hand end of the chart and costs no extra query.
    */
   const newestValues = (columns: Columns): (number | null)[] =>
-    props.series.map((_, index) => {
+    series().map((_, index) => {
       const points = columns[index + 1] ?? []
       for (let at = points.length - 1; at >= 0; at--) {
         const value = points[at]
@@ -210,10 +226,10 @@ export default function TimeSeriesTile(props: {
     time.className = 'chart-tooltip-time'
     box.append(time)
 
-    tooltipValues = props.series.map((series, index) => {
+    tooltipValues = series().map((entry, index) => {
       const row = document.createElement('div')
       row.className = 'chart-tooltip-row'
-      if (props.series.length > 1) {
+      if (series().length > 1) {
         const swatch = document.createElement('span')
         swatch.className = 'chart-tooltip-swatch'
         swatch.style.background = colorOf(index)
@@ -221,7 +237,7 @@ export default function TimeSeriesTile(props: {
       }
       const label = document.createElement('span')
       label.className = 'chart-tooltip-label'
-      label.textContent = series.label
+      label.textContent = entry.label
       const value = document.createElement('span')
       value.className = 'chart-tooltip-value'
       row.append(label, value)
@@ -246,7 +262,7 @@ export default function TimeSeriesTile(props: {
     const { from, to } = range()
     tooltipTime.textContent = formatTimestamp(x, to.getTime() - from.getTime())
     const unit = unitOf(props.yLabel)
-    props.series.forEach((_, index) => {
+    series().forEach((_, index) => {
       const value = raw[index + 1]?.[idx]
       tooltipValues[index].textContent =
         typeof value === 'number' ? `${formatNumber(value)}${unit ? ` ${unit}` : ''}` : '\u2014'
@@ -286,7 +302,7 @@ export default function TimeSeriesTile(props: {
     ],
     series: [
       {},
-      ...props.series.map((s, index) =>
+      ...series().map((s, index) =>
         props.bars
           ? {
               label: s.label,
@@ -322,7 +338,7 @@ export default function TimeSeriesTile(props: {
     // order — first series at the bottom — without uPlot having to know about
     // stacking.
     bands: props.stacked
-      ? props.series
+      ? series()
           .slice(1)
           .map((_, index) => ({ series: [index + 2, index + 1] as [number, number] }))
       : undefined,
@@ -362,7 +378,7 @@ export default function TimeSeriesTile(props: {
       : props.yRange
         ? { x: { time: true, range: () => xWindow }, y: { range: () => props.yRange! } }
         : { x: { time: true, range: () => xWindow } },
-    legend: { show: props.series.length > 1 && !props.stacked },
+    legend: { show: series().length > 1 && !props.stacked },
     cursor: {
       drag: { x: true, y: false, setScale: false },
       // uPlot shares the cursor between every tile with this key. Only x means
@@ -423,7 +439,7 @@ export default function TimeSeriesTile(props: {
     if (props.bars) setBarMs(bucket.ms)
     const sql = timeSeriesSql({
       source: props.source,
-      series: props.series,
+      series: series(),
       bucket: bucket.sql,
       from,
       to,
@@ -432,11 +448,18 @@ export default function TimeSeriesTile(props: {
     const request = ++requestId
     if (!background) setLoading(true)
     try {
-      const rows = await fetchData<Array<Record<string, number | string>>>(sql)
+      const rows = props.metric
+        ? await fetchSeries<Array<Record<string, number | string>>>(
+            props.metric,
+            bucket.ms,
+            from,
+            to,
+          )
+        : await fetchData<Array<Record<string, number | string>>>(sql)
       if (request !== requestId || !chart) return
       const columns = toAligned(
         rows ?? [],
-        props.series.length,
+        series().length,
         props.bars ? { from, to, bucketMs: bucket.ms, fill: 0 } : undefined,
       ) as Columns
       // A single bucket has no neighbour: uPlot derives a bar's width from the
@@ -468,7 +491,7 @@ export default function TimeSeriesTile(props: {
   onMount(() => {
     // Reserve the summary cards before the first query comes back, so the strip
     // appears at its final size (values reading `—`) instead of growing.
-    publish(props.series.map(() => null))
+    publish(series().map(() => null))
 
     const observer = new ResizeObserver((entries) => {
       const next = Math.floor(entries[0].contentRect.width)
@@ -501,7 +524,7 @@ export default function TimeSeriesTile(props: {
     if (chartWidth <= 0) return
     range() // re-run when the selected range changes
     if (!chart) {
-      chart = new uPlot(options(chartWidth), [[], ...props.series.map(() => [])], container)
+      chart = new uPlot(options(chartWidth), [[], ...series().map(() => [])], container)
       buildTooltip(chart.over)
       spinner = buildSpinner(container)
     }

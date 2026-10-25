@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, State};
+use axum::extract::{DefaultBodyLimit, Extension, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -19,6 +19,7 @@ use crate::auth::{self, Auth};
 use crate::db::{Db, QueryError};
 use crate::gps;
 use crate::ingest::{self, IngestHandle, IngestItem};
+use crate::metrics;
 use crate::session;
 
 #[derive(Clone)]
@@ -65,6 +66,8 @@ pub fn router(state: AppState, ui_dir: PathBuf, tiles_dir: PathBuf) -> Router {
     let protected = Router::new()
         .route("/api/data", post(data))
         .route("/api/session", post(sign_in).delete(sign_out))
+        .route("/api/series", post(series))
+        .route("/api/me", get(me))
         .route(
             "/api/ingest",
             post(ingest).layer(DefaultBodyLimit::max(body_limit)),
@@ -89,12 +92,16 @@ pub fn router(state: AppState, ui_dir: PathBuf, tiles_dir: PathBuf) -> Router {
 /// involved and the credential never depends on the browser remembering it. The
 /// middleware has already accepted the request, so reaching this handler means
 /// the caller held a valid UI credential.
-async fn sign_in(State(state): State<AppState>, headers: HeaderMap) -> Response {
+async fn sign_in(
+    State(state): State<AppState>,
+    Extension(scope): Extension<auth::Scope>,
+    headers: HeaderMap,
+) -> Response {
     let Some(sessions) = state.auth.sessions.as_ref() else {
         // Authentication is off: there is nothing for the browser to keep.
         return StatusCode::NO_CONTENT.into_response();
     };
-    let Some(token) = sessions.issue(chrono::Utc::now()) else {
+    let Some(token) = sessions.issue(scope, chrono::Utc::now()) else {
         return (StatusCode::INTERNAL_SERVER_ERROR, "no entropy for a session").into_response();
     };
     let cookie = session::cookie(&token, session::is_secure(&headers));
@@ -107,6 +114,70 @@ async fn sign_in(State(state): State<AppState>, headers: HeaderMap) -> Response 
 async fn sign_out(State(_state): State<AppState>, headers: HeaderMap) -> Response {
     let cookie = session::cleared_cookie(session::is_secure(&headers));
     ([(header::SET_COOKIE, cookie)], StatusCode::NO_CONTENT).into_response()
+}
+
+/// What this credential may read, so the dashboard can show only the dashboards
+/// it can fill. Presentation only — the scope is enforced server-side.
+async fn me(Extension(scope): Extension<auth::Scope>) -> Response {
+    let scope = match scope {
+        auth::Scope::All => "all",
+        auth::Scope::Home => "home",
+    };
+    Json(json!({ "scope": scope })).into_response()
+}
+
+/// One named reading over `[from, to)`, bucketed. This is the whole of a
+/// restricted reader's view of the data: a metric id, a window and a bucket
+/// width, all of which the service turns into SQL itself.
+async fn series(
+    State(state): State<AppState>,
+    Extension(scope): Extension<auth::Scope>,
+    Json(request): Json<SeriesRequest>,
+) -> Response {
+    let metric = match crate::metrics::lookup(&request.metric, scope) {
+        Ok(metric) => metric,
+        Err(message) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response(),
+    };
+    if request.bucket_ms < metrics::MIN_BUCKET_MS || request.bucket_ms > metrics::MAX_BUCKET_MS {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "bucket_ms out of range" })),
+        )
+            .into_response();
+    }
+    let window = match (parse_stamp(&request.from), parse_stamp(&request.to)) {
+        (Some(from), Some(to)) if from < to => (from, to),
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "from and to must be RFC 3339 stamps, from before to" })),
+            )
+                .into_response();
+        }
+    };
+
+    let sql = metrics::series_sql(metric, window.0, window.1, request.bucket_ms);
+    let _read = state.data_lock.read().await;
+    match state.db.query_json(sql).await {
+        Ok(json) => ([(header::CONTENT_TYPE, "application/json")], json).into_response(),
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// A stamp is re-rendered from the parsed value, so nothing the caller typed
+/// reaches the SQL string.
+fn parse_stamp(text: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::parse_from_rfc3339(text)
+        .ok()
+        .map(|at| at.with_timezone(&chrono::Utc))
+}
+
+#[derive(Deserialize)]
+struct SeriesRequest {
+    metric: String,
+    bucket_ms: u64,
+    from: String,
+    to: String,
 }
 
 /// The sensor whose freshness defines liveness, and how old its newest reading

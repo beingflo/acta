@@ -6,6 +6,7 @@ mod config;
 mod db;
 mod gps;
 mod ingest;
+mod metrics;
 mod parquet;
 mod session;
 mod storage;

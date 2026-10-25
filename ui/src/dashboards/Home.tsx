@@ -1,59 +1,49 @@
 import LatestStrip from '../components/LatestStrip'
 import TimeSeriesTile from '../components/TimeSeriesTile'
 
-const LIVING_ROOM = 'co2-sensor-living-room'
-const BAROMETER = 'brightness-barometer-living-room'
-const LAUNDRY_ROOM = 'humidity-laundry-room'
-
-// Variant fields are cast to their concrete type before aggregating: DuckDB's
-// aggregates over a raw floating-point Variant field are silently wrong, e.g.
-// avg(data.temperature) returns 21.0 where avg(data.temperature::DOUBLE) returns
-// 21.23. Integer-typed fields happen to be correct either way.
+// Every reading here is a metric the service defines — source, expression and
+// the type casts included (see `service/src/metrics.rs`). Nothing in this file
+// is SQL, which is what lets a restricted viewer be given this dashboard and
+// only this dashboard: it can name these readings and no others.
 export default function Home() {
   return (
     <div class="dashboard">
       <LatestStrip />
-      <TimeSeriesTile
-        wide
-        title="Living room CO₂"
-        source={LIVING_ROOM}
-        series={[{ label: 'CO₂', expr: 'avg(data.co2::BIGINT)' }]}
-        yLabel="CO₂ [ppm]"
-      />
+      <TimeSeriesTile wide title="Living room CO₂" metric="co2_ppm" label="CO₂" yLabel="CO₂ [ppm]" />
       <TimeSeriesTile
         title="Living room temperature"
-        source={LIVING_ROOM}
-        series={[{ label: 'Temperature', expr: 'avg(data.temperature::DOUBLE)' }]}
+        metric="living_temp_c"
+        label="Temperature"
         yLabel="Temperature [°C]"
       />
       <TimeSeriesTile
         title="Living room brightness"
-        source={BAROMETER}
-        series={[{ label: 'Brightness', expr: 'avg(data.lux::DOUBLE)' }]}
+        metric="brightness_lux"
+        label="Brightness"
         yLabel="Brightness [lux]"
       />
       <TimeSeriesTile
         title="Living room humidity"
-        source={LIVING_ROOM}
-        series={[{ label: 'Humidity', expr: 'avg(data.humidity::DOUBLE)' }]}
+        metric="living_humidity_pct"
+        label="Humidity"
         yLabel="Humidity [%]"
       />
       <TimeSeriesTile
         title="Living room pressure"
-        source={BAROMETER}
-        series={[{ label: 'Pressure', expr: 'avg(data.pressure::DOUBLE)' }]}
+        metric="living_pressure_hpa"
+        label="Pressure"
         yLabel="Pressure [hPa]"
       />
       <TimeSeriesTile
         title="Laundry room humidity"
-        source={LAUNDRY_ROOM}
-        series={[{ label: 'Humidity', expr: 'avg(data.humidity::DOUBLE)' }]}
+        metric="laundry_humidity_pct"
+        label="Humidity"
         yLabel="Humidity [%]"
       />
       <TimeSeriesTile
         title="Laundry room temperature"
-        source={LAUNDRY_ROOM}
-        series={[{ label: 'Temperature', expr: 'avg(data.temperature::DOUBLE)' }]}
+        metric="laundry_temp_c"
+        label="Temperature"
         yLabel="Temperature [°C]"
       />
     </div>

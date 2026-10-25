@@ -13,10 +13,13 @@ export type Dashboard = {
   id: string
   title: string
   component: Component
+  /** Whether a restricted viewer (`scope: home`) may open it. Presentation
+   *  only: what such a viewer can *read* is decided by the service. */
+  shared?: boolean
 }
 
 export const DASHBOARDS: Dashboard[] = [
-  { id: 'home', title: 'home', component: Home },
+  { id: 'home', title: 'home', component: Home, shared: true },
   { id: 'acta', title: 'acta', component: Acta },
   { id: 'eos', title: 'eos', component: Eos },
   { id: 'marending', title: 'marending', component: Marending },

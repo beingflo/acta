@@ -19,6 +19,10 @@ Secret=acta-auth-ui-user,type=env,target=ACTA_AUTH_UI_USER
 Secret=acta-auth-ui-password,type=env,target=ACTA_AUTH_UI_PASSWORD
 Secret=acta-auth-sensor-user,type=env,target=ACTA_AUTH_SENSOR_USER
 Secret=acta-auth-sensor-password,type=env,target=ACTA_AUTH_SENSOR_PASSWORD
+# The optional restricted viewer (home dashboards only); the deploy drops these
+# two lines when the secrets are not installed.
+Secret=acta-auth-home-user,type=env,target=ACTA_AUTH_HOME_USER
+Secret=acta-auth-home-password,type=env,target=ACTA_AUTH_HOME_PASSWORD
 Secret=acta-aws-key-id,type=env,target=AWS_ACCESS_KEY_ID
 Secret=acta-aws-secret,type=env,target=AWS_SECRET_ACCESS_KEY
 
