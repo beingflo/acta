@@ -879,3 +879,80 @@ body.fullscreen-tile {
     display: none;
   }
 }
+
+/* Sign-in: the same surface as the command palette, because it is the same kind
+   of interruption. It appears only when the API answers 401 — with a live
+   session cookie nobody ever sees it. */
+.signin-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 18vh 12px 12px;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.signin {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(300px, 100%);
+  padding: 18px 16px 16px;
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 12px;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.03), 0 18px 44px rgba(0, 0, 0, 0.1);
+}
+
+.signin-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #111;
+}
+
+.signin input {
+  padding: 8px 10px;
+  font-size: 15px;
+  color: #111;
+  background: #fafafa;
+  border: 1px solid #ececec;
+  border-radius: 7px;
+  outline: none;
+}
+
+.signin input:focus {
+  background: #fff;
+  border-color: #d8d8d8;
+}
+
+.signin-error {
+  margin: 0;
+  font-size: 11px;
+  color: #a33;
+}
+
+.signin button {
+  margin-top: 2px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #fff;
+  background: #111;
+  border-radius: 7px;
+}
+
+.signin button:disabled {
+  color: #a8a8a8;
+  background: #f1f1f1;
+}
+
+/* 16px keeps iOS from zooming into the field when it takes focus. */
+@media (max-width: 720px) {
+  .signin input {
+    font-size: 16px;
+  }
+}

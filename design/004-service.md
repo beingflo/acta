@@ -24,12 +24,30 @@ See
 
 ## Auth
 
-Two HTTP basic credentials are configured through podman secrets. The UI credential guards the dashboard, the read
-API and the tile archives; the sensor credential may only write data (`POST /api/ingest`, `POST /api/gps/{source}`), so a sensor password can be rotated
-without touching the dashboard. `/health` stays public for the deploy script and any external probe. An
-unauthenticated request gets `401` with `WWW-Authenticate`, so a browser prompts once and then attaches the header to
-the same-origin `/api/data` and `/tiles/*` requests. With no UI credential configured, authentication is off, which is
-what the local dev server relies on. Passwords are compared in constant time and never logged.
+Two HTTP basic credentials are configured through podman secrets. The UI credential guards the read API and the tile
+archives; the sensor credential may only write data (`POST /api/ingest`, `POST /api/gps/{source}`), so a sensor
+password can be rotated without touching the dashboard. With no UI credential configured, authentication is off, which
+is what the local dev server relies on. Passwords are compared in constant time and never logged.
+
+**The app shell is public** — `index.html`, the hashed assets, the manifest and the service worker. It carries no data,
+and an installed home-screen app on iOS cannot show its own sign-in form if a credential is needed to fetch the HTML.
+Everything that holds data (`/api/*`, `/tiles/*`) stays behind the middleware, and `/health` stays public for the deploy
+script and any probe.
+
+**The dashboard signs in with a cookie, not with the browser's dialog.** iOS never offers to save basic credentials, and
+an installed web app gets its own storage container, so anything relying on the browser's prompt asks for the password
+on every cold launch. Instead the app posts the credential once to `/api/session` (setting `Authorization` itself, so no
+modal appears) and the service answers with `acta_session`: `HttpOnly`, `SameSite=Lax`, `Secure` when the request
+arrived over TLS, valid for **two months**. `DELETE /api/session` clears it.
+
+The cookie holds a signed claim rather than an identifier: `expiry ‖ nonce`, with an HMAC-SHA256 tag over it. Nothing is
+stored server-side, so a restart costs nobody a login, and no lookup happens per request — one `ring::hmac` verify
+(~0.1 µs) sits in the middleware, before the basic-credential check. The signing key is derived from the UI password, so
+**rotating that password invalidates every outstanding cookie**; that is the revocation story, and the reason a
+sign-out only clears the browser's copy. Refusals carry no `WWW-Authenticate`: the app owns the sign-in, and a challenge
+on a `fetch` makes browsers raise their own dialog instead — which strands clients that cannot answer a modal.
+
+Basic auth is still accepted on every path, so `curl`, the hurl scenarios and the deploy scripts are unaffected.
 
 ## Health
 

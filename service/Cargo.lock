@@ -12,6 +12,7 @@ dependencies = [
  "duckdb",
  "futures",
  "object_store",
+ "ring",
  "serde",
  "serde_json",
  "subtle",

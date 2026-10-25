@@ -7,6 +7,7 @@ mod db;
 mod gps;
 mod ingest;
 mod parquet;
+mod session;
 mod storage;
 
 use std::sync::Arc;
@@ -83,8 +84,9 @@ async fn serve(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
         data_lock,
         ingest_max_batch: settings.write.ingest_max_batch,
         ingest_max_body_bytes: settings.write.ingest_max_body_bytes,
+        auth: settings.auth,
     };
-    let app = api::router(state, settings.ui_dir, settings.tiles_dir, settings.auth);
+    let app = api::router(state, settings.ui_dir, settings.tiles_dir);
 
     let listener = tokio::net::TcpListener::bind(settings.addr).await?;
     axum::serve(listener, app)

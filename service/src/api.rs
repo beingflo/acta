@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, State};
-use axum::http::{HeaderName, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router, middleware};
@@ -19,6 +19,7 @@ use crate::auth::{self, Auth};
 use crate::db::{Db, QueryError};
 use crate::gps;
 use crate::ingest::{self, IngestHandle, IngestItem};
+use crate::session;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -29,9 +30,11 @@ pub struct AppState {
     pub data_lock: Arc<RwLock<()>>,
     pub ingest_max_batch: usize,
     pub ingest_max_body_bytes: usize,
+    /// Who may read, and the key that signs dashboard session cookies.
+    pub auth: Auth,
 }
 
-pub fn router(state: AppState, ui_dir: PathBuf, tiles_dir: PathBuf, auth: Auth) -> Router {
+pub fn router(state: AppState, ui_dir: PathBuf, tiles_dir: PathBuf) -> Router {
     let index = ui_dir.join("index.html");
     let spa = ServeDir::new(ui_dir).fallback(ServeFile::new(index));
     let body_limit = state.ingest_max_body_bytes;
@@ -54,10 +57,14 @@ pub fn router(state: AppState, ui_dir: PathBuf, tiles_dir: PathBuf, auth: Auth) 
         ))
         .service(ServeDir::new(tiles_dir));
 
-    // Everything below the health check is protected; `/health` stays public
-    // so the deploy script and systemd can probe a host without credentials.
+    // Everything below the health check is protected, except the app itself: the
+    // shell holds no data, and a home-screen app on iOS cannot show its own
+    // sign-in form if a credential is needed to fetch the HTML. `/health` stays
+    // public so the deploy script and systemd can probe a host without
+    // credentials.
     let protected = Router::new()
         .route("/api/data", post(data))
+        .route("/api/session", post(sign_in).delete(sign_out))
         .route(
             "/api/ingest",
             post(ingest).layer(DefaultBodyLimit::max(body_limit)),
@@ -67,14 +74,39 @@ pub fn router(state: AppState, ui_dir: PathBuf, tiles_dir: PathBuf, auth: Auth) 
             post(gps::upload).layer(DefaultBodyLimit::max(body_limit)),
         )
         .nest_service("/tiles", tiles)
-        .fallback_service(spa)
-        .layer(middleware::from_fn_with_state(auth, auth::authorize));
+        .layer(middleware::from_fn_with_state(state.auth.clone(), auth::authorize));
 
     Router::new()
         .route("/health", get(health))
         .merge(protected)
+        .fallback_service(spa)
         .layer(CatchPanicLayer::new())
         .with_state(state)
+}
+
+/// Trade basic credentials for a session cookie. The dashboard calls this from
+/// its own sign-in form, with the header set by hand, so no browser dialog is
+/// involved and the credential never depends on the browser remembering it. The
+/// middleware has already accepted the request, so reaching this handler means
+/// the caller held a valid UI credential.
+async fn sign_in(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let Some(sessions) = state.auth.sessions.as_ref() else {
+        // Authentication is off: there is nothing for the browser to keep.
+        return StatusCode::NO_CONTENT.into_response();
+    };
+    let Some(token) = sessions.issue(chrono::Utc::now()) else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "no entropy for a session").into_response();
+    };
+    let cookie = session::cookie(&token, session::is_secure(&headers));
+    ([(header::SET_COOKIE, cookie)], StatusCode::NO_CONTENT).into_response()
+}
+
+/// Forget the cookie. The token itself stays valid until it expires — this
+/// design has no session store to revoke against; rotating the UI password is
+/// what invalidates outstanding cookies.
+async fn sign_out(State(_state): State<AppState>, headers: HeaderMap) -> Response {
+    let cookie = session::cleared_cookie(session::is_secure(&headers));
+    ([(header::SET_COOKIE, cookie)], StatusCode::NO_CONTENT).into_response()
 }
 
 /// The sensor whose freshness defines liveness, and how old its newest reading

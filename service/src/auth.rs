@@ -20,7 +20,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use base64::Engine;
+use chrono::Utc;
 use subtle::ConstantTimeEq;
+
+use crate::session::{self, Sessions};
 
 #[derive(Clone)]
 pub struct Credential {
@@ -53,6 +56,20 @@ impl fmt::Debug for Credential {
 pub struct Auth {
     pub ui: Option<Credential>,
     pub sensor: Option<Credential>,
+    /// The signer for dashboard session cookies. Present exactly when a UI
+    /// credential is configured.
+    pub sessions: Option<Sessions>,
+}
+
+impl Auth {
+    pub fn new(ui: Option<Credential>, sensor: Option<Credential>) -> Self {
+        let sessions = ui.as_ref().map(|credential| Sessions::new(&credential.password));
+        Self {
+            ui,
+            sensor,
+            sessions,
+        }
+    }
 }
 
 impl Auth {
@@ -99,6 +116,9 @@ pub async fn authorize(State(auth): State<Auth>, request: Request<Body>, next: N
     } else {
         None
     }
+    // The session cookie first: it is a single signature check, and it is what
+    // every dashboard request carries once the user has signed in.
+    .or_else(|| session_role(&auth, request.headers()))
     .or_else(|| basic_credentials(request.headers()).and_then(|(user, password)| auth.role(&user, &password)));
 
     // The sensor role may write data and nothing else.
@@ -114,12 +134,19 @@ fn is_ingest(request: &Request<Body>) -> bool {
     request.method() == Method::POST && request.uri().path() == "/api/ingest"
 }
 
+/// The dashboard's own credential: a cookie this process signed, still inside
+/// its two months.
+fn session_role(auth: &Auth, headers: &HeaderMap) -> Option<Role> {
+    let sessions = auth.sessions.as_ref()?;
+    let token = session::token_from(headers)?;
+    sessions.verify(token, Utc::now()).then_some(Role::Ui)
+}
+
 fn is_gps(request: &Request<Body>) -> bool {
     request.method() == Method::POST && request.uri().path().starts_with("/api/gps/")
 }
 
-fn bearer_token(headers: &HeaderMap) -> Option<String> {
-    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+fn bearer_token(headers: &HeaderMap) -> Option<String> {    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
     let token = value
         .strip_prefix("Bearer ")
         .or_else(|| value.strip_prefix("bearer "))?
@@ -144,14 +171,14 @@ fn basic_credentials(headers: &HeaderMap) -> Option<(String, String)> {
     Some((user.to_string(), password.to_string()))
 }
 
+/// A refusal, deliberately without `WWW-Authenticate`.
+///
+/// The challenge is what makes a *browser* pop its own credential dialog, and
+/// every request this service refuses comes from the dashboard, which owns its
+/// sign-in. A challenge on a `fetch` would put the browser's dialog in front of
+/// the app's, and clients that cannot answer a modal (headless browsers, and the
+/// connection pool behind them) hang instead of failing. So the app gets a bare
+/// 401 and decides for itself what to show.
 fn unauthorized() -> Response {
-    (
-        StatusCode::UNAUTHORIZED,
-        [(
-            header::WWW_AUTHENTICATE,
-            "Basic realm=\"acta\", charset=\"UTF-8\"",
-        )],
-        "authentication required",
-    )
-        .into_response()
+    (StatusCode::UNAUTHORIZED, "authentication required").into_response()
 }

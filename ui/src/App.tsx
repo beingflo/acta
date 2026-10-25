@@ -4,6 +4,7 @@ import { Dynamic } from 'solid-js/web'
 import DashboardPicker from './components/DashboardPicker'
 import LiveIndicator from './components/LiveIndicator'
 import RangePicker from './components/RangePicker'
+import SignIn from './components/SignIn'
 import { DASHBOARDS } from './dashboards'
 import { fetchData } from './lib/api'
 import { fullscreenTile, installFullscreenShortcuts } from './lib/fullscreen'
@@ -118,6 +119,7 @@ export default function App() {
       <main>
         <Dynamic component={current().component} />
       </main>
+      <SignIn />
     </div>
   )
 }

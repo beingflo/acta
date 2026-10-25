@@ -113,7 +113,7 @@ fn parse_auth() -> Result<Auth, String> {
             "ACTA_AUTH_SENSOR_* is set without ACTA_AUTH_UI_*; refusing to leave the UI open".into(),
         );
     }
-    Ok(Auth { ui, sensor })
+    Ok(Auth::new(ui, sensor))
 }
 
 fn credential(user_key: &str, password_key: &str) -> Result<Option<Credential>, String> {
