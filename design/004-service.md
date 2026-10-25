@@ -50,8 +50,10 @@ on a `fetch` makes browsers raise their own dialog instead — which strands cli
 **Basic credentials are read in two places only**: `/api/session`, where the dashboard trades them for the cookie, and
 the sensor's write routes (`/api/ingest`, `/api/gps/{source}`), which a machine presents on every request. Every other
 route wants the cookie — a basic header on `/api/data`, `/api/series`, `/api/me` or `/tiles/*` is simply ignored and
-answered `401`. That narrows the surface a password can be guessed against to a single endpoint, which is what makes the
-throttle below worth having. Locally, with authentication off, nothing changes: there is nothing to present.
+answered `401`. The sensor routes answer the sensor credential only: a dashboard credential there — basic or cookie —
+gets the same `401` a wrong guess gets, so the UI password can be confirmed nowhere but `/api/session`, which is paced
+by the throttle below (and a leaked dashboard password buys no write access). Locally, with authentication off,
+nothing changes: there is nothing to present.
 
 **Failed sign-ins are paced, without any per-address state.** Ten failures inside a minute and the eleventh answers `429`
 with `Retry-After`; a success clears the budget, and a correct credential is verified *before* the budget is consulted, so

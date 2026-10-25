@@ -1,8 +1,10 @@
 //! Authentication for the dashboard and the ingest endpoint.
 //!
-//! Two independent credentials are supported. The UI role may reach every path;
-//! the sensor role may only write data (`POST /api/ingest`, `POST /api/gps/{source}`),
-//! so a sensor credential can be rotated without touching the dashboard password.
+//! Two independent credentials are supported. The UI role may read every path its
+//! scope allows but never writes; the sensor role may only write data
+//! (`POST /api/ingest`, `POST /api/gps/{source}`), so a sensor credential can be
+//! rotated without touching the dashboard password — and a leaked dashboard
+//! password grants no write access at all.
 //! `/health` stays public for the deploy script and any external probe.
 //!
 //! **Basic credentials are only read where something presents them on purpose:**
@@ -275,6 +277,12 @@ pub async fn authorize(
     });
 
     match role {
+        // The sensor routes are for the sensor credential alone. A dashboard
+        // credential — basic or cookie — is refused there, and as a `401`: the
+        // same status a wrong guess gets, so the response can neither confirm
+        // nor deny a guessed UI password. `/api/session`, which is paced by the
+        // throttle, is the only place that password can be checked.
+        Some(Role::Ui(_)) if sensor_route => unauthorized(),
         Some(Role::Ui(scope)) if scope.may_reach(&path) => {
             if sign_in {
                 // A real sign-in clears the budget, so the owner who mistyped
