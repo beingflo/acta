@@ -12,6 +12,7 @@ import {
 } from 'solid-js'
 
 import { fetchData } from '../lib/api'
+import { type Detail, showDetail } from '../lib/detail'
 import { exitFullscreen, fullscreenTile, setHoveredTile } from '../lib/fullscreen'
 import ExpandButton from './ExpandButton'
 import { formatNumber } from '../lib/format'
@@ -35,7 +36,7 @@ export type CursoredRow = { us: number }
 /** How long the row that marks a refresh's new entries stays marked. The CSS
  *  animation of the same length does the fading; this only drops the class so
  *  the same row can light up again. */
-const ARRIVED_FLASH_MS = 1_800
+const ARRIVED_FLASH_MS = 3_000
 
 /** One page request, as the query builder receives it. */
 export type PageQuery = {
@@ -44,6 +45,9 @@ export type PageQuery = {
   limit: number
   offset: number
   cursorUs?: number
+  /** Rows strictly newer than this, oldest first. The overlay's walk up the
+   *  table is the only caller; paging always goes down. */
+  newerThanUs?: number
 }
 
 /** A row index whose timestamp is known, so pages near it need no offset. */
@@ -90,6 +94,10 @@ export default function PagedTable<T extends CursoredRow>(props: {
   /** The row's cells. Called once per row; read the accessor to stay live when
    *  a refresh replaces the page. */
   row: (row: Accessor<T>) => JSX.Element
+  /** What the row-detail overlay shows for one row. A table whose rows carry
+   *  only the columns it displays fetches the rest here, hence the promise.
+   *  Omit it and the rows stay inert. */
+  detail?: (row: T) => Detail | Promise<Detail>
 }) {
   const [total, setTotal] = createSignal<number | null>(null)
   const [scrollTop, setScrollTop] = createSignal(0)
@@ -106,13 +114,69 @@ export default function PagedTable<T extends CursoredRow>(props: {
 
   const rowHeight = () => props.rowHeight ?? DEFAULT_ROW_HEIGHT
 
+  /** Open one row in the detail overlay. A table that carries only the columns
+   *  it shows fetches the rest here; a click that fails leaves the table alone. */
+  const openDetail = async (row: T) => {
+    try {
+      const detail = await detailOf(row)
+      if (detail) showDetail(detail)
+    } catch (error) {
+      console.error('could not open the row detail', error)
+    }
+  }
+
+  /**
+   * Everything the overlay shows for `row`, including how to walk to its
+   * neighbours. The walk is bound to the row's *timestamp*, not to the index it
+   * happened to be at: a refresh that brings entries in above shifts every index
+   * by however many arrived, which would leave the arrow keys a few rows off the
+   * event being read.
+   */
+  const detailOf = async (row: T): Promise<Detail | null> => {
+    if (!props.detail) return null
+    return { ...(await props.detail(row)), step: (delta) => stepDetailFrom(row.us, delta) }
+  }
+
+  const stepDetailFrom = async (us: number, delta: -1 | 1): Promise<Detail | null> => {
+    const row = await neighbour(us, delta)
+    return row ? detailOf(row) : null
+  }
+
+  /**
+   * The row one step away from the one stamped `us`, asked of the service rather
+   * than read out of the cache.
+   *
+   * Cached pages are indexed by row number, and a refresh that brings entries in
+   * above shifts those numbers: a row can slide into a page that was not among
+   * the refreshed ones, and then no cached page holds it at all — which used to
+   * leave the walk with nowhere to go. A timestamp bound has neither problem, and
+   * costs one two-row query.
+   */
+  const neighbour = async (us: number, delta: -1 | 1): Promise<T | null> => {
+    const { from, to } = range()
+    if (delta === 1) {
+      // At or below the current row, newest first: the first row is the one being
+      // read and the second is the next one down. A single row means the table
+      // ends here.
+      const rows = await fetchData<T[]>(
+        props.pageSql({ from, to, limit: 2, offset: 0, cursorUs: us }),
+      )
+      return rows?.[1] ?? null
+    }
+    // Strictly newer, oldest first: the first row is the one directly above.
+    const rows = await fetchData<T[]>(
+      props.pageSql({ from, to, limit: 1, offset: 0, newerThanUs: us }),
+    )
+    return rows?.[0] ?? null
+  }
+
   // Plain state plus a version signal: the caches are written from async
   // callbacks and read while rendering, and making them reactive would make the
   // fill effect retrigger itself.
   let cache = new Map<number, T[]>()
   let anchors: Anchor[] = [{ index: 0, cursorUs: null }]
   let entries = new Map<number, WindowRow<T>>()
-  let loading = new Set<number>()
+  let loading = new Map<number, Promise<void>>()
   let token = 0
   let scroller!: HTMLDivElement
   let flashTimer = 0
@@ -266,17 +330,24 @@ export default function PagedTable<T extends CursoredRow>(props: {
     return null
   }
 
-  const loadPage = async (page: number, current: number) => {
-    if (cache.has(page) || loading.has(page)) return
-    loading.add(page)
-    try {
-      const rows = await fetchPage(page, current)
-      if (rows) storePage(page, rows)
-    } catch (error) {
-      if (current === token) console.error('table page query failed', error)
-    } finally {
-      loading.delete(page)
-    }
+  const loadPage = (page: number, current: number): Promise<void> => {
+    if (cache.has(page)) return Promise.resolve()
+    // A page already in flight is awaited rather than skipped, so a caller that
+    // needs one specific row (the overlay stepping past the window) gets it.
+    const pending = loading.get(page)
+    if (pending) return pending
+    const task = (async () => {
+      try {
+        const rows = await fetchPage(page, current)
+        if (rows) storePage(page, rows)
+      } catch (error) {
+        if (current === token) console.error('table page query failed', error)
+      } finally {
+        loading.delete(page)
+      }
+    })()
+    loading.set(page, task)
+    return task
   }
 
   /** Fetch the pages the window needs and does not have yet, in order, so each
@@ -313,7 +384,7 @@ export default function PagedTable<T extends CursoredRow>(props: {
     cache = new Map()
     anchors = [{ index: 0, cursorUs: null }]
     entries = new Map()
-    loading = new Set()
+    loading = new Map()
     newestUs = null
     setArrivedFrom(null)
     setTotal(null)
@@ -437,8 +508,12 @@ export default function PagedTable<T extends CursoredRow>(props: {
                 {(entry) => (
                   <div
                     class="table-row"
-                    classList={{ arrived: entry.row().us === arrivedFrom() }}
+                    classList={{
+                      arrived: entry.row().us === arrivedFrom(),
+                      clickable: props.detail !== undefined,
+                    }}
                     style={{ height: `${rowHeight()}px` }}
+                    onClick={() => void openDetail(entry.row())}
                   >
                     {props.row(entry.row)}
                   </div>

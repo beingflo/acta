@@ -1,6 +1,7 @@
 import type { Accessor } from 'solid-js'
 
 import { tableTimeParts } from '../lib/format'
+import { eventDetail } from '../lib/detail'
 import { type EventRow, eventCountSql, eventPageSql } from '../lib/query'
 import PagedTable from './PagedTable'
 
@@ -30,6 +31,9 @@ export default function EventTable(props: { title: string }) {
         </>
       }
       row={(row) => <EventCells row={row} />}
+      // The row already carries the payload as JSON text, so the overlay needs
+      // no query: what the table shows whole is already the whole event.
+      detail={(row) => eventDetail(row.us, row.source, row.data)}
     />
   )
 }

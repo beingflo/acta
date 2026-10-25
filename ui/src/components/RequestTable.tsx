@@ -1,7 +1,15 @@
 import type { Accessor } from 'solid-js'
 
+import { fetchData } from '../lib/api'
+import { eventDetail } from '../lib/detail'
 import { latencyParts, tableTimeParts } from '../lib/format'
-import { type RequestRow, requestCountSql, requestPageSql } from '../lib/query'
+import {
+  type RequestRow,
+  type StoredEvent,
+  eventDetailSql,
+  requestCountSql,
+  requestPageSql,
+} from '../lib/query'
 import PagedTable from './PagedTable'
 
 const Table = PagedTable<RequestRow>
@@ -27,6 +35,13 @@ export default function RequestTable(props: { source: string; title: string }) {
         </>
       }
       row={(row) => <RequestCells row={row} />}
+      // The table keeps the six columns it displays; a request row carries more
+      // than that (and different fields from source to source), so the overlay
+      // asks for the stored event itself.
+      detail={async (row) => {
+        const stored = await fetchData<StoredEvent | null>(eventDetailSql(props.source, row.us))
+        return eventDetail(row.us, stored?.source ?? props.source, stored?.data ?? null)
+      }}
     />
   )
 }

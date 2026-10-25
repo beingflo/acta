@@ -151,11 +151,24 @@ the table never blanks on the 30s tick.
 The table sheds columns as the window narrows: the error message first, then the referrer, latency and the method,
 leaving time, URI, status and user agent at phone width.
 
-A refresh marks the oldest row it brought in with a faint tint that fades after a couple of seconds, so it is
-visible how many entries just arrived: everything above that row is new. The row is found by comparing the fetched
+A refresh marks the oldest row it brought in with a faint tint that fades over three seconds, so it is visible how
+many entries just arrived: everything above that row is new. The row is found by comparing the fetched
 newest-first page against the newest timestamp the table had seen, so it needs no extra query and no server-side
 state. When the whole fetched window is new the mark is omitted rather than drawn somewhere in the middle — a batch
 too big for the screen shows itself by having no boundary.
+
+Clicking a row opens the whole event in an overlay, pretty-printed: a cell shows the columns the table has, and a
+source's payload is not shaped like any other's — an `eos-stats` sample nests whole subsystems, a Marending request
+carries fields the table never shows. The document is coloured by token — keys, string values, numbers, literals — off
+the text `JSON.stringify` produced, which is enough to read a wide payload without shipping a highlighter. The Acta
+table already holds the payload, so the overlay needs no query; the request table keeps only its displayed columns and
+asks the service for the stored event by source and timestamp on click. The arrow keys walk that table without closing
+the overlay; the walk asks for the row immediately older or newer than the timestamp being read, so it never depends on
+which pages happen to be cached — row numbers shift whenever a refresh brings new entries in above, and pages beyond the
+refreshed window keep answering with their old contents until they are re-fetched. The end of the table is a no-op
+rather than a close, so overshooting does not lose the event being read. `Escape` or the hush closes it, and it sits
+above the tiles rather than inside one: a tile is its own stacking context, which would paint a fixed backdrop under its
+neighbours.
 
 ### location
 

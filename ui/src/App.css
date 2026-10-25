@@ -509,12 +509,12 @@ body.fullscreen-tile {
    a poll it is visible where the new entries begin — and how many there are. The
    animation owns the fade; its length is ARRIVED_FLASH_MS in PagedTable.tsx. */
 .table-row.arrived {
-  animation: row-arrived 1.8s ease-out;
+  animation: row-arrived 3s ease-out;
 }
 
 @keyframes row-arrived {
   0%,
-  55% {
+  60% {
     background-color: hsla(150, 35%, 45%, 0.13);
   }
   100% {
@@ -524,6 +524,12 @@ body.fullscreen-tile {
 
 .table-row:hover {
   background: #fafafa;
+}
+
+/* The payload cell clips to two lines; the row itself opens the whole event, so
+   the pointer says so. */
+.table-row.clickable {
+  cursor: pointer;
 }
 
 .table-time {
@@ -787,6 +793,113 @@ body.fullscreen-tile {
   }
 }
 
+/* Row detail: one event, whole. Wider than the palette and taller, because the
+   payloads worth opening are wide rather than deep — a server sample or a
+   request with every header. The panel scrolls inside itself, so nothing is
+   clipped to the viewport. */
+.detail-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 105;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 7vh 24px 24px;
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: palette-hush 120ms ease-out;
+}
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  width: min(980px, 100%);
+  max-height: 100%;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 12px;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.03), 0 18px 44px rgba(0, 0, 0, 0.1);
+  animation: palette-rise 140ms ease-out;
+}
+
+.detail-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 11px 12px 10px 16px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.detail-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111;
+}
+
+.detail-time {
+  font-size: 12px;
+  color: #8a8a8a;
+  font-variant-numeric: tabular-nums;
+}
+
+.detail-button {
+  padding: 2px 6px;
+  font-size: 12px;
+  color: #8a8a8a;
+  border-radius: 4px;
+}
+
+.detail-button:hover {
+  color: #333;
+  background: #f4f4f4;
+}
+
+/* Keyboard-only affordance: a phone has no arrow keys, so the narrow layout
+   leaves the hint out rather than advertising something that cannot be done. */
+.detail-hint {
+  font-size: 11px;
+  color: #b0b0b0;
+}
+
+/* Wrapped rather than scrolled sideways: one long user agent can be wider than
+   any panel, and a horizontal scrollbar on a phone is a dead end. `min-height:
+   0` is what lets it scroll inside the flex column instead of growing past it. */
+.detail-json {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 14px 16px 18px;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #1a1a1a;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+}
+
+/* Four colours, muted but distinct: enough to separate a key from its value, a
+   number from a string and a literal from both, without turning the panel into a
+   rainbow. */
+.detail-json .json-key {
+  color: hsl(152, 62%, 27%);
+}
+
+.detail-json .json-string {
+  color: hsl(22, 68%, 38%);
+}
+
+.detail-json .json-number {
+  color: hsl(215, 62%, 40%);
+}
+
+.detail-json .json-literal {
+  color: hsl(275, 42%, 44%);
+}
+
 .palette-search {
   display: flex;
   align-items: center;
@@ -887,6 +1000,18 @@ body.fullscreen-tile {
 
   .palette-search kbd,
   .palette-hints {
+    display: none;
+  }
+
+  .detail-backdrop {
+    padding: 3vh 8px 8px;
+  }
+
+  .detail-json {
+    font-size: 11px;
+  }
+
+  .detail-hint {
     display: none;
   }
 }

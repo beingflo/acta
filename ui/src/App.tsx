@@ -4,10 +4,12 @@ import { Dynamic } from 'solid-js/web'
 import DashboardPicker from './components/DashboardPicker'
 import LiveIndicator from './components/LiveIndicator'
 import RangePicker from './components/RangePicker'
+import RowDetail from './components/RowDetail'
 import SignIn from './components/SignIn'
 import { DASHBOARDS, type Dashboard } from './dashboards'
 import { fetchData } from './lib/api'
 import { loadScope, scope } from './lib/session'
+import { installDetailShortcuts } from './lib/detail'
 import { fullscreenTile, installFullscreenShortcuts } from './lib/fullscreen'
 import { customRange, installRangeShortcuts, preset, setDataBounds } from './lib/range'
 import { installRefreshShortcut, refreshTick } from './lib/refresh'
@@ -60,6 +62,11 @@ export default function App() {
 
     window.addEventListener('popstate', syncFromUrl)
     onCleanup(() => window.removeEventListener('popstate', syncFromUrl))
+
+    // Ahead of the tile shortcuts: `Escape` must close a detail without also
+    // restoring a maximized tile.
+    const uninstallDetail = installDetailShortcuts()
+    onCleanup(uninstallDetail)
 
     const uninstallFullscreen = installFullscreenShortcuts()
     onCleanup(uninstallFullscreen)
@@ -140,6 +147,7 @@ export default function App() {
       <main>
         <Dynamic component={current().component} />
       </main>
+      <RowDetail />
       <SignIn />
     </div>
   )

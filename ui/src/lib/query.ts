@@ -342,21 +342,34 @@ export function eventPageSql(options: {
   limit: number
   offset?: number
   cursorUs?: number
+  /** Rows strictly newer than this, oldest first — the direction the overlay's
+   *  upward walk asks for. Mutually exclusive with `cursorUs`. */
+  newerThanUs?: number
 }): string {
   const { from, to } = options
   const limit = Math.max(1, Math.floor(options.limit))
   const offset = Math.max(0, Math.floor(options.offset ?? 0))
-  const cursor = options.cursorUs === undefined ? '' : `\n    AND ${upTo(options.cursorUs)}`
-  return `SELECT to_json(array_agg(
-           struct_pack(us := us, source := source, data := data) ORDER BY us DESC
-         ))::VARCHAR
+  // Newest first for paging; oldest first for the one row above a detail's row.
+  const descending = options.newerThanUs === undefined
+  const bound = descending
+    ? options.cursorUs === undefined
+      ? ''
+      : `\n    AND ${upTo(options.cursorUs)}`
+    : `\n    AND ${newerThan(options.newerThanUs!)}`
+  const order = descending ? 'DESC' : 'ASC'
+  // `coalesce` for the empty page: casting a null `array_agg` to VARCHAR is an
+  // error in this DuckDB, not a null, so a page past either end used to answer
+  // 400 instead of `[]`.
+  return `SELECT coalesce(to_json(array_agg(
+           struct_pack(us := us, source := source, data := data) ORDER BY us ${order}
+         )), '[]'::JSON)::VARCHAR
 FROM (
   SELECT epoch_us(CAST(timestamp AS TIMESTAMP)) AS us,
          source,
          to_json(data)::VARCHAR                AS data
   FROM events
-  WHERE ${eventWindow(from, to)}${cursor}
-  ORDER BY timestamp DESC
+  WHERE ${eventWindow(from, to)}${bound}
+  ORDER BY timestamp ${order}
   LIMIT ${limit} OFFSET ${offset}
 )`
 }
@@ -377,6 +390,37 @@ export type RequestRow = {
   error: string | null
 }
 
+/** What `eventDetailSql` returns: the stored event without the timestamp the
+ *  caller already holds, or `null` when the row is no longer there. */
+export type StoredEvent = {
+  source: string | null
+  /** The payload as JSON text, the form every page query carries it in. */
+  data: string | null
+}
+
+/**
+ * One whole stored event, for the row-detail overlay.
+ *
+ * The request table keeps only the columns it displays, and a source's payload
+ * carries more than that — the fields differ per source, and a wide event has
+ * dozens. The row is addressed by source and timestamp, the same pair paging
+ * already relies on (including its assumption that one instant holds one row per
+ * source), and coalesced to `null` so a row that slid out of the window answers
+ * instead of failing the query.
+ */
+export function eventDetailSql(source: string, us: number): string {
+  return `SELECT coalesce(
+           (SELECT to_json(struct_pack(
+                     source := source, data := to_json(data)::VARCHAR
+                   ))::VARCHAR
+            FROM events
+            WHERE source = '${escape(source)}'
+              AND timestamp = CAST(make_timestamp(${Math.round(us)}) AS TIMESTAMPTZ)
+            LIMIT 1),
+           'null'
+         )`
+}
+
 /** The window every access-log query shares. */
 function requestWindow(source: string, from: Date, to: Date): string {
   return `source = '${escape(source)}'
@@ -389,6 +433,12 @@ function requestWindow(source: string, from: Date, to: Date): string {
  *  offset. */
 function upTo(cursorUs: number): string {
   return `timestamp <= CAST(make_timestamp(${Math.round(cursorUs)}) AS TIMESTAMPTZ)`
+}
+
+/** `timestamp > cursor`: the direction the table's paging never needs, but the
+ *  row-detail overlay's upward walk does. */
+function newerThan(cursorUs: number): string {
+  return `timestamp > CAST(make_timestamp(${Math.round(cursorUs)}) AS TIMESTAMPTZ)`
 }
 
 /** Number of requests in the window, or in `[from, cursor]` when a cursor is
@@ -417,17 +467,25 @@ export function requestPageSql(options: {
   limit: number
   offset?: number
   cursorUs?: number
+  /** See `eventPageSql`: rows strictly newer than this, oldest first. */
+  newerThanUs?: number
 }): string {
   const { source, from, to } = options
   const limit = Math.max(1, Math.floor(options.limit))
   const offset = Math.max(0, Math.floor(options.offset ?? 0))
-  const cursor = options.cursorUs === undefined ? '' : `\n    AND ${upTo(options.cursorUs)}`
+  const descending = options.newerThanUs === undefined
+  const bound = descending
+    ? options.cursorUs === undefined
+      ? ''
+      : `\n    AND ${upTo(options.cursorUs)}`
+    : `\n    AND ${newerThan(options.newerThanUs!)}`
+  const order = descending ? 'DESC' : 'ASC'
   // `data.errors` is a Variant array of `{ event, error }`; its text form is the
   // only useful rendering for a table cell, and null on requests without one.
-  return `SELECT to_json(array_agg(struct_pack(
+  return `SELECT coalesce(to_json(array_agg(struct_pack(
            us := us, method := method, uri := uri, status := status,
            latency := latency, referrer := referrer, agent := agent, error := error
-         ) ORDER BY us DESC))::VARCHAR
+         ) ORDER BY us ${order})), '[]'::JSON)::VARCHAR
 FROM (
   SELECT epoch_us(CAST(timestamp AS TIMESTAMP)) AS us,
          data.method::VARCHAR                   AS method,
@@ -438,8 +496,8 @@ FROM (
          data.user_agent::VARCHAR               AS agent,
          data.errors::VARCHAR                   AS error
   FROM events
-  WHERE ${requestWindow(source, from, to)}${cursor}
-  ORDER BY timestamp DESC
+  WHERE ${requestWindow(source, from, to)}${bound}
+  ORDER BY timestamp ${order}
   LIMIT ${limit} OFFSET ${offset}
 )`
 }
