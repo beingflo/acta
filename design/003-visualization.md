@@ -151,6 +151,12 @@ the table never blanks on the 30s tick.
 The table sheds columns as the window narrows: the error message first, then the referrer, latency and the method,
 leaving time, URI, status and user agent at phone width.
 
+A refresh marks the oldest row it brought in with a faint tint that fades after a couple of seconds, so it is
+visible how many entries just arrived: everything above that row is new. The row is found by comparing the fetched
+newest-first page against the newest timestamp the table had seen, so it needs no extra query and no server-side
+state. When the whole fetched window is new the mark is omitted rather than drawn somewhere in the middle — a batch
+too big for the screen shows itself by having no boundary.
+
 ### location
 
 A single full-width and full-height tile showing a map fed by the `location_florian` data source: the position fixes
@@ -241,7 +247,7 @@ whenever `all` is chosen.
 
 ## Refresh
 
-Only a live window is polled: a selection that ends at the wall clock and spans at most an hour — the 1h preset,
+Only a live window is polled: a selection that ends at the wall clock and spans at most two hours — the 1h preset,
 or a custom range ending now. It refreshes every 10 s, with a little jitter, so the dashboard follows a live feed; a
 small mark next to the range buttons says when this is on. Any other window is a historical snapshot, fetched when it
 is selected and then left alone, so 6h, 1d, 30d and `all` do not poll. Charts, tables and the scalar strips share the

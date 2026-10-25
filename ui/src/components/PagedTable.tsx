@@ -32,6 +32,11 @@ const MAX_SKIP = 1_200
 /** A row that can serve as a page cursor. */
 export type CursoredRow = { us: number }
 
+/** How long the row that marks a refresh's new entries stays marked. The CSS
+ *  animation of the same length does the fading; this only drops the class so
+ *  the same row can light up again. */
+const ARRIVED_FLASH_MS = 1_800
+
 /** One page request, as the query builder receives it. */
 export type PageQuery = {
   from: Date
@@ -91,6 +96,9 @@ export default function PagedTable<T extends CursoredRow>(props: {
   const [viewport, setViewport] = createSignal(0)
   const [version, setVersion] = createSignal(0)
   const [busy, setBusy] = createSignal(false)
+  // Timestamp of the oldest row the last refresh brought in, so a poll can show
+  // where its new entries begin. See `arrivedBoundary`.
+  const [arrivedFrom, setArrivedFrom] = createSignal<number | null>(null)
 
   // The tile id for the `v` shortcut; the title is unique per dashboard.
   const id = props.title
@@ -107,6 +115,10 @@ export default function PagedTable<T extends CursoredRow>(props: {
   let loading = new Set<number>()
   let token = 0
   let scroller!: HTMLDivElement
+  let flashTimer = 0
+  /** The newest row seen so far: the baseline a refresh compares against to
+   *  learn what is new. Reset with the cache, so a range change starts over. */
+  let newestUs: number | null = null
 
   const renderedRows = () => Math.ceil(viewport() / rowHeight()) + OVERSCAN_ROWS * 2
   const firstIndex = createMemo(() =>
@@ -220,12 +232,38 @@ export default function PagedTable<T extends CursoredRow>(props: {
 
   const storePage = (page: number, rows: T[]) => {
     cache.set(page, rows)
-    if (rows.length > 0) remember({ index: page * PAGE_ROWS, cursorUs: rows[0].us })
+    if (rows.length > 0) {
+      remember({ index: page * PAGE_ROWS, cursorUs: rows[0].us })
+      // Rows are newest first, so the first row of the first page is the newest
+      // of all; taking the maximum keeps a prefetched page above the window from
+      // being mistaken for it.
+      if (newestUs === null || rows[0].us > newestUs) newestUs = rows[0].us
+    }
     // Rows already on screen keep their elements (see `WindowRow`), so a
     // replaced page has to push its new rows into the entries it covers.
     const base = page * PAGE_ROWS
     rows.forEach((row, offset) => entries.get(base + offset)?.set(row))
     setVersion((n) => n + 1)
+  }
+
+  /**
+   * The timestamp of the oldest row that arrived since `previous` — one row that
+   * marks where a refresh's new entries end, so a poll shows how many came in.
+   *
+   * `null` when nothing is new, and also when the batch runs past every fetched
+   * row: a highlight in the middle of a long run of new entries would be a lie,
+   * and its absence already says the batch is bigger than the screen.
+   */
+  const arrivedBoundary = (pages: [number, T[]][], previous: number | null): number | null => {
+    if (previous === null) return null
+    let boundary: number | null = null
+    for (const [, rows] of pages) {
+      for (const row of rows) {
+        if (row.us <= previous) return boundary
+        boundary = row.us
+      }
+    }
+    return null
   }
 
   const loadPage = async (page: number, current: number) => {
@@ -276,6 +314,8 @@ export default function PagedTable<T extends CursoredRow>(props: {
     anchors = [{ index: 0, cursorUs: null }]
     entries = new Map()
     loading = new Set()
+    newestUs = null
+    setArrivedFrom(null)
     setTotal(null)
     setVersion((n) => n + 1)
     setBusy(true)
@@ -301,6 +341,8 @@ export default function PagedTable<T extends CursoredRow>(props: {
     if (total() === null) return
     const current = token
     const pages = windowPages()
+    // Read before the pages are replaced: this is the "before" of the diff.
+    const previousNewest = newestUs
     try {
       const { from, to } = range()
       const counts = await fetchData<{ n: number }>(props.countSql(from, to))
@@ -313,6 +355,14 @@ export default function PagedTable<T extends CursoredRow>(props: {
         if (rows) fresh.push([page, rows])
       }
       for (const [page, rows] of fresh) storePage(page, rows)
+      const boundary = arrivedBoundary(fresh, previousNewest)
+      setArrivedFrom(boundary)
+      // The animation does the fading; the class is dropped afterwards so the
+      // same row can light up again the next time it is the boundary.
+      window.clearTimeout(flashTimer)
+      if (boundary !== null) {
+        flashTimer = window.setTimeout(() => setArrivedFrom(null), ARRIVED_FLASH_MS)
+      }
     } catch (error) {
       if (current === token) console.error('table refresh failed', error)
     }
@@ -342,6 +392,7 @@ export default function PagedTable<T extends CursoredRow>(props: {
     onCleanup(() => {
       observer.disconnect()
       token++ // drop replies that are still in flight
+      window.clearTimeout(flashTimer)
       if (isFullscreen()) exitFullscreen()
     })
   })
@@ -384,7 +435,11 @@ export default function PagedTable<T extends CursoredRow>(props: {
             >
               <For each={windowRows()}>
                 {(entry) => (
-                  <div class="table-row" style={{ height: `${rowHeight()}px` }}>
+                  <div
+                    class="table-row"
+                    classList={{ arrived: entry.row().us === arrivedFrom() }}
+                    style={{ height: `${rowHeight()}px` }}
+                  >
                     {props.row(entry.row)}
                   </div>
                 )}

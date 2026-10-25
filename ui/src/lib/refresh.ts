@@ -1,7 +1,7 @@
 /** Auto-refresh policy.
  *
  *  Only a live window is polled: a selection that ends at the wall clock and
- *  spans at most an hour (the 1h preset, or a custom range ending now). Any
+ *  spans at most two hours (the 1h preset, or a custom range ending now). Any
  *  other selection is a historical snapshot, fetched when it is chosen and then
  *  left alone — polling it would only repeat the same query. The `r` shortcut
  *  reloads the current view either way.
@@ -11,8 +11,10 @@ import { createEffect, createSignal, on } from 'solid-js'
 
 import { range } from './range'
 
-/** The longest window still treated as live. */
-const LIVE_SPAN_MS = 3_600_000
+/** The longest window still treated as live. Two hours covers the 1h preset and
+ *  a hand-picked window around it; 6h and wider are explicit snapshots, where
+ *  polling would re-run the same expensive query every 10 s. */
+const LIVE_SPAN_MS = 2 * 3_600_000
 /** How far the window's end may sit from the wall clock and still count as
  *  "now": a custom range picked in the datetime inputs has minute precision. */
 const END_TOLERANCE_MS = 60_000

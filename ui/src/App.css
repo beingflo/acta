@@ -505,6 +505,23 @@ body.fullscreen-tile {
   border-bottom: 1px solid #f7f7f7;
 }
 
+/* The oldest row a refresh brought in keeps a faint tint for a moment, so after
+   a poll it is visible where the new entries begin — and how many there are. The
+   animation owns the fade; its length is ARRIVED_FLASH_MS in PagedTable.tsx. */
+.table-row.arrived {
+  animation: row-arrived 1.8s ease-out;
+}
+
+@keyframes row-arrived {
+  0%,
+  55% {
+    background-color: hsla(150, 35%, 45%, 0.13);
+  }
+  100% {
+    background-color: hsla(150, 35%, 45%, 0);
+  }
+}
+
 .table-row:hover {
   background: #fafafa;
 }
