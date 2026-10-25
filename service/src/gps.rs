@@ -15,6 +15,11 @@
 //! The feature is stored whole, so position fixes and the app's occasional
 //! `properties.type == "trip"` summaries live in one source and the read path
 //! branches on that field.
+//!
+//! The response body must carry `{"result": "ok"}`: Overland deletes its queued
+//! points only when it sees that key (or when the user turns on "Consider HTTP
+//! 2XX Successful"), and otherwise silently retries the same batch forever while
+//! the server answers 202. `accepted` rides along for anyone watching with curl.
 
 use axum::Json;
 use axum::body::Bytes;
@@ -74,5 +79,9 @@ pub async fn upload(
             return ApiError::Internal(err).into_response();
         }
     }
-    (StatusCode::ACCEPTED, Json(json!({ "accepted": accepted }))).into_response()
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({ "result": "ok", "accepted": accepted })),
+    )
+        .into_response()
 }
