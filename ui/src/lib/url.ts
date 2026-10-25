@@ -81,10 +81,23 @@ export function rangeQuery(preset: Preset, custom: Range | null): string {
   return `?range=${preset}`
 }
 
-/** Write `url` unless it already matches the address bar, so reacting to
- *  `popstate` does not push a duplicate history entry. */
+/** Write `url` unless it already points at the same place as the address bar,
+ *  so reacting to `popstate` does not push a duplicate history entry. Compared
+ *  by path and query parameters rather than by string: the same URL can be
+ *  spelled with different but equivalent percent-encoding, and Back to a
+ *  hand-typed URL must not push a duplicate encoded copy (which would truncate
+ *  forward history). */
 export function writeUrl(url: string, replace: boolean): void {
-  if (url === window.location.pathname + window.location.search) return
+  if (sameLocation(url)) return
   if (replace) window.history.replaceState(null, '', url)
   else window.history.pushState(null, '', url)
+}
+
+function sameLocation(url: string): boolean {
+  return canonical(new URL(url, window.location.origin)) === canonical(new URL(window.location.href))
+}
+
+function canonical(url: URL): string {
+  const params = [...url.searchParams].sort(([a], [b]) => a.localeCompare(b))
+  return `${url.pathname}?${new URLSearchParams(params).toString()}`
 }

@@ -1,4 +1,4 @@
-import { createEffect, createSignal, on, onCleanup, onMount } from 'solid-js'
+import { batch, createEffect, createSignal, on, onCleanup, onMount } from 'solid-js'
 import { Dynamic } from 'solid-js/web'
 
 import DashboardPicker from './components/DashboardPicker'
@@ -16,10 +16,11 @@ export default function App() {
   const [active, setActive] = createSignal(knownDashboard(readDashboard()))
   const current = () => DASHBOARDS.find((dashboard) => dashboard.id === active()) ?? DASHBOARDS[0]
 
-  const syncFromUrl = () => {
-    setActive(knownDashboard(readDashboard()))
-    applyRangeFromUrl()
-  }
+  const syncFromUrl = () =>
+    batch(() => {
+      setActive(knownDashboard(readDashboard()))
+      applyRangeFromUrl()
+    })
 
   /** The data extents, which only the `all` range reads. */
   const refreshBounds = () =>
@@ -88,12 +89,15 @@ export default function App() {
     ),
   )
 
-  // Range -> query string.
+  // Range -> query string. A range change is a history entry of its own, so
+  // Back steps through the windows visited before leaving the dashboard.
+  // Back/forward land here too, but their URL already matches and `writeUrl`
+  // then leaves the stack alone.
   createEffect(
     on(
       [preset, customRange],
       ([nextPreset, nextCustom]) =>
-        writeUrl(window.location.pathname + rangeQuery(nextPreset, nextCustom), true),
+        writeUrl(window.location.pathname + rangeQuery(nextPreset, nextCustom), false),
       { defer: true },
     ),
   )

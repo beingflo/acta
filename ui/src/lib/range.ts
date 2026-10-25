@@ -1,6 +1,6 @@
 /** Time range state shared by all tiles. */
 
-import { createSignal } from 'solid-js'
+import { batch, createSignal } from 'solid-js'
 
 export type Preset = 'all' | '1y' | '30d' | '7d' | '1d' | '6h' | '30m' | 'custom'
 export type Range = {
@@ -41,9 +41,12 @@ export function setPreset(next: Preset) {
 export function setCustomRange(next: Range) {
   // A window that ends at the clock is a live window: keep the start fixed and
   // re-resolve the end on every query, so it still ends at "now" after the tab
-  // has sat in the background for a while.
-  setCustomRangeSignal({ ...next, liveEnd: next.liveEnd ?? endsNow(next.to) })
-  setPresetSignal('custom')
+  // has sat in the background for a while. Batched so the URL effect never sees
+  // the new range with the old preset and writes an intermediate URL.
+  batch(() => {
+    setCustomRangeSignal({ ...next, liveEnd: next.liveEnd ?? endsNow(next.to) })
+    setPresetSignal('custom')
+  })
 }
 
 /** True when `date` is close enough to the wall clock to be "now". */

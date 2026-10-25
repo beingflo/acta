@@ -213,8 +213,9 @@ The selected dashboard and range are reflected in the URL: the dashboard as a pa
 `/marending`, `/location`) and the range as a query parameter, using a shorthand for presets (`?range=30d`) or ISO
 from/to for a custom range (`?from=2026-10-10T00:00:00.000Z&to=2026-10-11T00:00:00.000Z`). A custom range with a live
 end writes `from` alone: the missing `to` means "resolve it to now when read", so reopening the URL keeps following
-the clock. The URL is read on load and on back/forward; dashboard switches push a history entry while range changes
-replace the current one.
+the clock. The URL is read on load and on back/forward. Dashboard switches and range changes each push a history entry,
+so Back steps through the ranges visited before leaving the dashboard; landing on an entry never pushes another one,
+because the URL already matches.
 
 Relative ranges and live-ended custom ranges always end at the wall clock. A feed that stops therefore leaves a recent
 window empty rather than silently showing the last window it had: the gap is what the dashboard should report. `all` is
