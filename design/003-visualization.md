@@ -20,7 +20,8 @@ The UI is light-mode only and deliberately minimal: white cards with hairline bo
 tile titles, and one thin line per series with a faint wash of the same hue under the curve. Every series is drawn in
 one green so the dashboards read as a family rather than a per-quantity color code.
 Hovering a tile and pressing `v` expands it to fill the viewport;
-`v`, `Escape` or the tile's × restores it.
+`v`, `Escape` or the tile's × restores it. Chart tiles get the whole plot, the event tables the whole list, which
+simply pages in as many extra rows as the taller viewport shows.
 
 ## API
 
@@ -65,8 +66,8 @@ TODO
 
 Dashboards make up the primary interface of the visualization frontend. The active dashboard is named in the header
 picker. Each dashboard is a grid of tiles; a tile has a centered title above its chart. The header keeps its height and
-the dashboard area below it scrolls, so a dashboard can fill the viewport (Marending, Location) or grow past it (Home)
-without relying on viewport-height arithmetic. Tiles reflow to a single column on narrow screens.
+the dashboard area below it scrolls, so a dashboard can fill the viewport (Marending, Acta, Location) or grow past it
+(Home) without relying on viewport-height arithmetic. Tiles reflow to a single column on narrow screens.
 Dashboards are hardcoded in the application, no dynamic configuration needed and no user modifiability.
 
 Dashboards can be switched by hitting cmd+k: This pops up a command-palette like selector where all available dashboards are listed. Within
@@ -89,6 +90,22 @@ The CO2 tile spans the full width. The other tiles are half width, two per row.
 The tiles are fed by three sensors: `co2-sensor-living-room` (co2, temperature, humidity),
 `brightness-barometer-living-room` (lux, pressure, temperature) and `humidity-laundry-room` (humidity, temperature).
 
+### acta
+
+The whole firehose: every row that enters the system, whatever its source. Above the chart a strip of scalars: data
+on disk, rows stored in all files, rows in the selected range with their per-minute rate, the last hour's rate, the
+age of the newest entry, and how many sources fed the range. The age is taken over the whole dataset, so it still
+reads correctly when the window is stepped back in time. File sizes come from the Parquet footers via
+`parquet_file_metadata`; the frontend finds the data directory as the one DuckDB is allowed to read. A full-width bar
+chart of incoming entries per bucket — all sources counted together — follows, so a stalled collector or a spurt
+shows up as a quiet or busy stretch. Below it a table fills the rest of the viewport with the individual rows in the
+same range, newest first: time, source, and the payload as one compact JSON column. The payload is not flattened into
+a column per key, because sources share no schema and a wide event (the server stats) would need dozens of columns for
+every other source to leave empty. The JSON wraps to two lines, with the full text on hover.
+
+It is the same paged, virtualized table as Marending's, so a wide range is browsable at the same cost as the first
+screen.
+
 ### eos
 
 The server itself, sampled every 10 s by `stats/collect.py` — a systemd timer on the host, see
@@ -105,8 +122,10 @@ field a collector starts sending is readable without adding a tile for it.
 ### marending
 
 Access logs from the Caddy proxy in front of `marending.dev`, migrated as the `marending` source
-(`{ method, uri, user_agent, referrer, status, latency_ns, errors? }`). A full-width bar chart of requests per bucket
-spans the top, each bar split between what the site served and what it answered with an error (status 4xx/5xx), so a
+(`{ method, uri, user_agent, referrer, status, latency_ns, errors? }`). Above the chart a strip of scalars tuned to the
+log: all requests stored, requests in the selected range with their per-minute rate, the last hour's rate, the error
+rate, p95 and median latency, and the age of the newest request. A full-width bar chart of requests per bucket
+follows, each bar split between what the site served and what it answered with an error (status 4xx/5xx), so a
 bucket that is half errors reads as half a red bar. Below it a table fills the rest of the viewport with the individual
 requests in the same range: time, method, URI, status, latency, referrer, user agent and, where the handler logged one,
 the error message. Rows newest first. A bucket that saw no requests is drawn as zero, so every bar is one bucket wide
@@ -159,7 +178,9 @@ A maximized tile is the only chart on screen, so it is the only one that takes p
 Dragging horizontally selects a custom range; a short drag is ignored, so it still reads as a click.
 
 Charts are lines by default; a tile can ask for bars instead, which is what counts per bucket want. Bars get a flat fill
-and a zero-based y axis, since a bar reads its height from the axis. A bar tile can also stack its series: a bucket is
+and a zero-based y axis, since a bar reads its height from the axis. A bar tile names its bucket width in the title
+(`· per 15 min`): the width is chosen from the range and the tile's width, and a bar's height only means something per
+that span. A bar tile can also stack its series: a bucket is
 then one bar, and each series paints the slice between its own cumulative value and the layer below it.
 
 Every tile aggregates into buckets sized from the selected window and the tile's width, down to 10 ms. The x axis is
@@ -183,10 +204,10 @@ As an example, the 30d button sets the selected time range to `[now - 30d, now]`
 All chart tiles that have a time axis update to reflect the selected timerange. By default the 1d option is selected.
 The frontend resolves the selection to concrete timestamps and embeds them into every tile query.
 
-The selected dashboard and range are reflected in the URL: the dashboard as a path (`/home`, `/eos`, `/marending`,
-`/location`) and the range as a query parameter, using a shorthand for presets (`?range=30d`) or ISO from/to for a
-custom range (`?from=2026-10-10T00:00:00.000Z&to=2026-10-11T00:00:00.000Z`). The URL is read on load and on back/forward;
-dashboard switches push a history entry while range changes replace the current one.
+The selected dashboard and range are reflected in the URL: the dashboard as a path (`/home`, `/acta`, `/eos`,
+`/marending`, `/location`) and the range as a query parameter, using a shorthand for presets (`?range=30d`) or ISO
+from/to for a custom range (`?from=2026-10-10T00:00:00.000Z&to=2026-10-11T00:00:00.000Z`). The URL is read on load
+and on back/forward; dashboard switches push a history entry while range changes replace the current one.
 
 Relative ranges end at the wall clock, unless the data has not received a point recently, in which case they end at the
 newest available point. A stalled dataset then shows its latest window instead of an empty chart.

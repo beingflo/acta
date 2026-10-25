@@ -7,8 +7,9 @@ const HUE = 150
 export const STROKE = `hsl(${HUE}, 28%, 40%)`
 
 /** Flat fill for bar charts: `fillFor` builds a gradient, which only reads well
- *  under a line. */
-export const BAR_FILL = `hsla(${HUE}, 30%, 45%, 0.55)`
+ *  under a line. Dark enough that a run of bars reads as one solid mass, while
+ *  the line charts' wash stays the lightest thing in the palette. */
+export const BAR_FILL = `hsla(${HUE}, 30%, 30%, 0.85)`
 
 /** Marending stacks what got through under what the handler rejected: a deeper
  *  green than the shared fill, and red for the rejected slice. */

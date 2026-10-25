@@ -10,6 +10,63 @@ export function formatNumber(value: number): string {
   return fixed.includes('.') ? fixed.replace(/0+$/, '').replace(/\.$/, '') : fixed
 }
 
+/** Large counts in a card-sized form: 9893 as 9.89k, 6828129 as 6.83M. */
+export function formatCompact(value: number): string {
+  const units = ['', 'k', 'M', 'B']
+  let scaled = Math.abs(value)
+  let unit = 0
+  while (scaled >= 1000 && unit < units.length - 1) {
+    scaled /= 1000
+    unit++
+  }
+  const digits = scaled >= 100 ? 0 : 2
+  const fixed = scaled.toFixed(digits)
+  const text = fixed.includes('.') ? fixed.replace(/0+$/, '').replace(/\.$/, '') : fixed
+  return `${value < 0 ? '-' : ''}${text}${units[unit]}`
+}
+
+/** Bytes split into a number and its unit, for a card's two-part value:
+ *  `{ value: '63.3', unit: 'MB' }`. */
+export function byteParts(bytes: number): { value: string; unit: string } {
+  const units = ['B', 'kB', 'MB', 'GB', 'TB']
+  let scaled = Math.abs(bytes)
+  let unit = 0
+  while (scaled >= 1000 && unit < units.length - 1) {
+    scaled /= 1000
+    unit++
+  }
+  const digits = unit === 0 || scaled >= 100 ? 0 : 1
+  return { value: `${bytes < 0 ? '-' : ''}${scaled.toFixed(digits)}`, unit: units[unit] }
+}
+
+/** A duration in milliseconds split into a number and its unit, for the stats
+ *  strip and the request table: `{ value: '1.3', unit: 's' }`. */
+export function latencyParts(ms: number | null): { value: string; unit: string } | null {
+  if (ms === null || !Number.isFinite(ms)) return null
+  if (ms >= 1_000) {
+    return { value: (ms / 1_000).toFixed(1).replace(/\.0$/, ''), unit: 's' }
+  }
+  return { value: ms >= 100 ? ms.toFixed(0) : ms.toFixed(1), unit: 'ms' }
+}
+
+/** A duration in seconds as the age of a timestamp: 32 s, 4 min, 3 h, 2 d. */
+export function formatAge(seconds: number): string {
+  const value = Math.max(0, seconds)
+  if (value < 60) return `${Math.round(value)} s`
+  if (value < 3_600) return `${Math.round(value / 60)} min`
+  if (value < 86_400) return `${Math.round(value / 3_600)} h`
+  return `${Math.round(value / 86_400)} d`
+}
+
+/** A bucket width for a bar chart's subtitle: 500 ms, 30 s, 5 min, 6 h, 2 d. */
+export function formatBucket(ms: number): string {
+  if (ms < 1_000) return `${Math.round(ms)} ms`
+  if (ms < 60_000) return `${Math.round(ms / 1_000)} s`
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)} min`
+  if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)} h`
+  return `${Math.round(ms / 86_400_000)} d`
+}
+
 /** Local time, at the detail the selected window can support: a multi-year
  *  window needs a date, a window of milliseconds needs its milliseconds. */
 export function formatTimestamp(seconds: number, spanMs: number): string {
@@ -20,6 +77,17 @@ export function formatTimestamp(seconds: number, spanMs: number): string {
   if (spanMs <= 3_600_000) clock += `:${pad(date.getSeconds())}`
   if (spanMs <= 2_000) clock += `.${pad(date.getMilliseconds(), 3)}`
   return `${day} ${clock}`
+}
+
+/** `DD-MM-YYYY` and `HH:MM:SS` in local time, from microseconds since the
+ *  epoch, day first like the chart axes. The paged tables render the two parts
+ *  separately: the date is the first thing to go on a narrow screen. */
+export function tableTimeParts(us: number): { day: string; clock: string } {
+  const date = new Date(Math.floor(us / 1000))
+  return {
+    day: `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()}`,
+    clock: `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`,
+  }
 }
 
 /** The `[ppm]` part of a y-label, if it has one. */

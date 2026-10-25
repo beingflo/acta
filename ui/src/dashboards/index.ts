@@ -1,5 +1,6 @@
 import { lazy, type Component } from 'solid-js'
 
+import Acta from './Acta'
 import Eos from './Eos'
 import Home from './Home'
 import Marending from './Marending'
@@ -16,6 +17,7 @@ export type Dashboard = {
 
 export const DASHBOARDS: Dashboard[] = [
   { id: 'home', title: 'home', component: Home },
+  { id: 'acta', title: 'acta', component: Acta },
   { id: 'eos', title: 'eos', component: Eos },
   { id: 'marending', title: 'marending', component: Marending },
   { id: 'location', title: 'location', component: Location },

@@ -84,7 +84,8 @@ export function bucketFor(from: Date, to: Date, widthPx: number, pxPerBucket = 1
 
 /** One query returning a single JSON array of `{ t, s0, s1, ... }` points. */
 export function timeSeriesSql(options: {
-  source: string
+  /** Omit to count every source, as the acta dashboard's overview does. */
+  source?: string
   series: Series[]
   bucket: string
   from: Date
@@ -92,6 +93,8 @@ export function timeSeriesSql(options: {
 }): string {
   const aggregates = options.series.map((s, i) => `${s.expr} AS s${i}`).join(',\n         ')
   const fields = options.series.map((_, i) => `s${i} := s${i}`).join(', ')
+  const source =
+    options.source === undefined ? '' : `\n    AND source = '${escape(options.source)}'`
   // `timestamp` is TIMESTAMPTZ; cast to naive UTC before time functions. The
   // bundled DuckDB has no ICU extension, so tz-aware functions are unavailable.
   return `SELECT coalesce(
@@ -102,9 +105,8 @@ FROM (
   SELECT time_bucket(INTERVAL '${options.bucket}', CAST(timestamp AS TIMESTAMP)) AS b,
          ${aggregates}
   FROM events
-  WHERE source = '${escape(options.source)}'
-    AND timestamp >= TIMESTAMPTZ '${options.from.toISOString()}'
-    AND timestamp <  TIMESTAMPTZ '${options.to.toISOString()}'
+  WHERE timestamp >= TIMESTAMPTZ '${options.from.toISOString()}'
+    AND timestamp <  TIMESTAMPTZ '${options.to.toISOString()}'${source}
   GROUP BY 1
 )`
 }
@@ -200,6 +202,155 @@ FROM (
 
 function escape(value: string): string {
   return value.replace(/'/g, "''")
+}
+
+/** The window every events query shares, across all sources. */
+function eventWindow(from: Date, to: Date): string {
+  return `timestamp >= TIMESTAMPTZ '${from.toISOString()}'
+    AND timestamp <  TIMESTAMPTZ '${to.toISOString()}'`
+}
+
+/** One row of any source, as the acta table renders it. */
+export type EventRow = {
+  /** Event time in microseconds since the epoch, and the table's page cursor. */
+  us: number
+  source: string | null
+  /** The payload as compact JSON text: the table shows it whole rather than
+   *  flattening it into a column per key, which no two sources share. */
+  data: string | null
+}
+
+/** Scalars for the acta stats strip. */
+export type Overview = {
+  /** Rows in the selected window. */
+  rows: number
+  /** Distinct sources in the window. */
+  sources: number
+  /** Their names, in no particular order. */
+  source_names: string[]
+  /** Rows in the window's final hour. */
+  last_hour: number
+  /** Newest event anywhere, in epoch seconds; null on an empty dataset. */
+  newest: number | null
+}
+
+/**
+ * Totals over the selected window. `newest` is taken over the whole dataset
+ * rather than the window, so the age of the last event still tells the truth
+ * when the window has been stepped back in time.
+ */
+export function overviewSql(from: Date, to: Date): string {
+  const lastHour = new Date(to.getTime() - 3_600_000).toISOString()
+  return `SELECT to_json(struct_pack(
+           rows := count(*),
+           sources := count(DISTINCT source),
+           source_names := list(DISTINCT source),
+           last_hour := count(*) FILTER (WHERE timestamp >= TIMESTAMPTZ '${lastHour}'),
+           newest := (SELECT epoch(CAST(max(timestamp) AS TIMESTAMP)) FROM events)
+         ))::VARCHAR
+FROM events
+WHERE timestamp >= TIMESTAMPTZ '${from.toISOString()}'
+  AND timestamp <  TIMESTAMPTZ '${to.toISOString()}'`
+}
+
+/** What the Parquet files on disk add up to. */
+export type FileStats = {
+  bytes: number
+  rows: number
+  files: number
+}
+
+/**
+ * The Parquet files on disk, summed from their footers. `parquet_file_metadata`
+ * needs a path and the frontend does not know the data directory, but the
+ * service allows exactly one read directory and DuckDB lists its temp directory
+ * first, so the data directory is the last entry of `allowed_directories`. The
+ * glob is the one behind the `events` view; `[!.]*` skips macOS sidecar files.
+ */
+export function filesSql(): string {
+  return `SELECT to_json(struct_pack(
+           bytes := sum(file_size_bytes),
+           rows := sum(num_rows),
+           files := count(*)
+         ))::VARCHAR
+FROM parquet_file_metadata(
+  current_setting('allowed_directories')[-1] || '[!.]*.parquet'
+)`
+}
+
+/** Scalars for the marending stats strip. */
+export type RequestOverview = {
+  /** Requests in the selected window. */
+  rows: number
+  /** Those answered with 4xx/5xx. */
+  errors: number
+  /** Requests in the window's final hour. */
+  last_hour: number
+  /** Median and 95th percentile response time, in nanoseconds. */
+  p50_ns: number | null
+  p95_ns: number | null
+  /** Every request ever logged for the source. */
+  all_rows: number
+  /** Newest request for the source, in epoch seconds. */
+  newest: number | null
+}
+
+/**
+ * Totals for the marending stats strip: the window's requests, errors and
+ * response times, plus the all-time count and the newest request. The latter
+ * two ignore the window so the strip still reads correctly when it is stepped
+ * back in time.
+ */
+export function requestOverviewSql(source: string, from: Date, to: Date): string {
+  const lastHour = new Date(to.getTime() - 3_600_000).toISOString()
+  return `SELECT to_json(struct_pack(
+           rows := count(*),
+           errors := count(*) FILTER (WHERE coalesce(TRY_CAST(data.status AS INT), 0) >= 400),
+           last_hour := count(*) FILTER (WHERE timestamp >= TIMESTAMPTZ '${lastHour}'),
+           p50_ns := quantile_cont(TRY_CAST(data.latency_ns AS BIGINT), 0.5),
+           p95_ns := quantile_cont(TRY_CAST(data.latency_ns AS BIGINT), 0.95),
+           all_rows := (SELECT count(*) FROM events WHERE source = '${escape(source)}'),
+           newest := (SELECT epoch(CAST(max(timestamp) AS TIMESTAMP)) FROM events
+                      WHERE source = '${escape(source)}')
+         ))::VARCHAR
+FROM events
+WHERE ${requestWindow(source, from, to)}`
+}
+
+/** Number of rows in the window, or in `[from, cursor]` when a cursor is given,
+ *  across every source. */
+export function eventCountSql(from: Date, to: Date, cursorUs?: number): string {
+  const bound = cursorUs === undefined ? '' : `\n    AND ${upTo(cursorUs)}`
+  return `SELECT to_json(struct_pack(n := count(*)))::VARCHAR
+FROM events
+WHERE ${eventWindow(from, to)}${bound}`
+}
+
+/** One page of the acta table: every row in the window, newest first, with its
+ *  source and its payload as JSON. */
+export function eventPageSql(options: {
+  from: Date
+  to: Date
+  limit: number
+  offset?: number
+  cursorUs?: number
+}): string {
+  const { from, to } = options
+  const limit = Math.max(1, Math.floor(options.limit))
+  const offset = Math.max(0, Math.floor(options.offset ?? 0))
+  const cursor = options.cursorUs === undefined ? '' : `\n    AND ${upTo(options.cursorUs)}`
+  return `SELECT to_json(array_agg(
+           struct_pack(us := us, source := source, data := data) ORDER BY us DESC
+         ))::VARCHAR
+FROM (
+  SELECT epoch_us(CAST(timestamp AS TIMESTAMP)) AS us,
+         source,
+         to_json(data)::VARCHAR                AS data
+  FROM events
+  WHERE ${eventWindow(from, to)}${cursor}
+  ORDER BY timestamp DESC
+  LIMIT ${limit} OFFSET ${offset}
+)`
 }
 
 /** One access-log request, as the request table renders it. */

@@ -1,3 +1,4 @@
+import MarendingStats from '../components/MarendingStats'
 import RequestTable from '../components/RequestTable'
 import TimeSeriesTile from '../components/TimeSeriesTile'
 import { BAR_ERROR_FILL, BAR_OK_FILL } from '../lib/palette'
@@ -9,10 +10,11 @@ const SOURCE = 'marending'
 const SERVED = `coalesce(TRY_CAST(data.status AS INT), 0) < 400`
 const REJECTED = `coalesce(TRY_CAST(data.status AS INT), 0) >= 400`
 
-/** Request volume above, the requests themselves below. */
+/** Request volume and latency above, the requests themselves below. */
 export default function Marending() {
   return (
-    <div class="dashboard marending">
+    <div class="dashboard filled marending">
+      <MarendingStats source={SOURCE} />
       <TimeSeriesTile
         bars
         stacked

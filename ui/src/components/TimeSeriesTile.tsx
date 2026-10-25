@@ -4,7 +4,7 @@ import 'uplot/dist/uPlot.min.css'
 
 import { fetchData } from '../lib/api'
 import { exitFullscreen, fullscreenTile, setHoveredTile } from '../lib/fullscreen'
-import { axisTickLabels, formatNumber, formatTimestamp, unitOf } from '../lib/format'
+import { axisTickLabels, formatBucket, formatNumber, formatTimestamp, unitOf } from '../lib/format'
 import { clearReadings, claimReadingOrder, publishReadings } from '../lib/latest'
 import { BAR_FILL, fillFor, STROKE } from '../lib/palette'
 import { bucketFor, timeSeriesSql, toAligned, type Series } from '../lib/query'
@@ -53,7 +53,8 @@ function stack(columns: Columns): Columns {
 
 export default function TimeSeriesTile(props: {
   title: string
-  source: string
+  /** Omit to aggregate every source, as the acta dashboard does. */
+  source?: string
   series: Series[]
   yLabel?: string
   height?: number
@@ -88,6 +89,10 @@ export default function TimeSeriesTile(props: {
   let requestId = 0
   const [width, setWidth] = createSignal(0)
   const [loading, setLoading] = createSignal(false)
+  // The bar width in milliseconds, for the subtitle: a bar is a count over a
+  // span, and a span is picked from the range and the tile's width, so it has
+  // to be stated rather than guessed from the axis.
+  const [barMs, setBarMs] = createSignal<number | null>(null)
   // x scale bounds in seconds, and whether the series is too sparse for a bare
   // line. Both are set per load, before the data reaches the chart.
   let xWindow: [number, number] = [0, 1]
@@ -346,6 +351,7 @@ export default function TimeSeriesTile(props: {
     // A count bucket that saw no requests is zero, not missing. Bars therefore
     // get the complete bucket grid; a line just connects across a quiet spell.
     const bucket = bucketFor(from, to, chartWidth, props.bars ? BAR_BUCKET_PX : 1)
+    if (props.bars) setBarMs(bucket.ms)
     const sql = timeSeriesSql({
       source: props.source,
       series: props.series,
@@ -464,7 +470,12 @@ export default function TimeSeriesTile(props: {
       onMouseEnter={() => setHoveredTile(id)}
       onMouseLeave={() => setHoveredTile(null)}
     >
-      <header class="tile-title">{props.title}</header>
+      <header class="tile-title">
+        {props.title}
+        <Show when={props.bars && barMs()}>
+          <span class="tile-note"> · per {formatBucket(barMs()!)}</span>
+        </Show>
+      </header>
       <Show when={isFullscreen()}>
         <button class="tile-close" onClick={exitFullscreen} aria-label="Exit fullscreen">
           ×

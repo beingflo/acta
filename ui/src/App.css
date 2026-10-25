@@ -210,6 +210,14 @@ body.fullscreen-tile {
   text-align: center;
 }
 
+/* A secondary note in a tile title, such as the bar width of a count per
+   bucket: quieter than the title, but part of the same line. */
+.tile-note {
+  font-size: 11px;
+  font-weight: 400;
+  color: #999;
+}
+
 .tile-body {
   display: flex;
   flex-direction: column;
@@ -293,6 +301,14 @@ body.fullscreen-tile {
   color: #6e6e6e;
 }
 
+.latest-card-sub {
+  overflow: hidden;
+  font-size: 10px;
+  color: #999;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* Cursor tooltip. It is a child of uPlot's `.u-over`, positioned with a
    transform from the crosshair; z-index must beat uPlot's own cursor lines
    and selection overlay, which sit at 100. */
@@ -340,12 +356,13 @@ body.fullscreen-tile {
   font-variant-numeric: tabular-nums;
 }
 
-/* Marending dashboard: a request-volume bar chart above a table that fills the
-   rest of the viewport. The table keeps a floor height; a window too short for
-   both is scrolled by `main` rather than crushing the table. */
-.dashboard.marending {
+/* Dashboards that put a stats strip, a chart and a table that fills the rest of
+   the viewport on one page (Acta, Marending). The table keeps a floor height; a
+   window too short for all three is scrolled by `main` rather than crushing the
+   table. */
+.dashboard.filled {
   grid-template-columns: 1fr;
-  grid-template-rows: auto minmax(220px, 1fr);
+  grid-template-rows: auto auto minmax(220px, 1fr);
   height: 100%;
 }
 
@@ -363,18 +380,29 @@ body.fullscreen-tile {
 }
 
 .table {
-  /* One template for the header and every row, so a column can be dropped by
-     rewriting this list in a media query instead of in eight places. The URI
-     gets one share of the slack, the user agent the biggest one: a URI is
-     mostly a path, an agent string is a whole sentence. */
-  --table-columns: 96px 46px minmax(120px, 1fr) 44px 62px minmax(90px, 0.8fr)
-    minmax(160px, 1.8fr) minmax(70px, 0.7fr);
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+}
+
+/* One template for the header and every row, so a column can be dropped by
+   rewriting this list in a media query instead of in eight places. The URI gets
+   one share of the slack, the user agent the biggest one: a URI is mostly a
+   path, an agent string is a whole sentence. The time column fits
+   `DD-MM-YYYY HH:MM:SS`; on narrow screens the date is dropped, so it can
+   shrink back to the clock. */
+.table.requests {
+  --table-columns: 128px 46px minmax(120px, 1fr) 44px 62px minmax(90px, 0.8fr)
+    minmax(160px, 1.8fr) minmax(70px, 0.7fr);
+}
+
+/* The acta table: the source is a fixed-ish label, the payload takes everything
+   left, because it is the column being read. */
+.table.events {
+  --table-columns: 128px minmax(140px, 220px) minmax(0, 1fr);
 }
 
 .table-head,
@@ -454,6 +482,23 @@ body.fullscreen-tile {
   color: #a33;
 }
 
+.table-source {
+  color: #555;
+}
+
+/* The payload is arbitrary JSON, so it wraps and is clipped after two lines
+   (the row is tall enough for both); the title carries the whole thing. It is
+   the reason the table exists, so it is the darkest text in the row. */
+.table-row .table-json {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 16px;
+  color: #111;
+}
+
 /* Snapshot tile: the newest row of a source, flattened to key/value rows in as
    many columns as fit, since the payload is a wide object rather than a
    series. */
@@ -502,8 +547,8 @@ body.fullscreen-tile {
    referrer is mostly empty, and latency is the least useful column while
    reading. Time, URI, status and user agent survive to the narrowest window. */
 @media (max-width: 1080px) {
-  .table {
-    --table-columns: 96px 46px minmax(120px, 1fr) 44px 62px minmax(90px, 0.8fr)
+  .table.requests {
+    --table-columns: 128px 46px minmax(120px, 1fr) 44px 62px minmax(90px, 0.8fr)
       minmax(160px, 1.8fr);
   }
 
@@ -513,8 +558,8 @@ body.fullscreen-tile {
 }
 
 @media (max-width: 880px) {
-  .table {
-    --table-columns: 96px 46px minmax(110px, 1fr) 44px 62px minmax(140px, 1.4fr);
+  .table.requests {
+    --table-columns: 128px 46px minmax(110px, 1fr) 44px 62px minmax(140px, 1.4fr);
   }
 
   .col-referrer {
@@ -523,12 +568,16 @@ body.fullscreen-tile {
 }
 
 @media (max-width: 720px) {
-  .table {
+  .table.requests {
     --table-columns: 88px 44px minmax(100px, 1fr) 42px minmax(130px, 1.2fr);
   }
 
   .col-latency {
     display: none;
+  }
+
+  .table.events {
+    --table-columns: 88px minmax(110px, 160px) minmax(0, 1fr);
   }
 
   /* Narrower gutters give the columns back the space they lose. */
@@ -542,11 +591,15 @@ body.fullscreen-tile {
 }
 
 @media (max-width: 560px) {
-  .table {
+  .table.requests {
     /* Below this width the last columns may have to shrink under their content;
        `minmax(0, …)` keeps the grid inside the tile and let ellipsis do the
        rest, rather than pushing the user agent off the right edge. */
     --table-columns: 72px minmax(0, 1fr) 36px minmax(0, 1.2fr);
+  }
+
+  .table.events {
+    --table-columns: 72px minmax(0, 0.6fr) minmax(0, 1fr);
   }
 
   .table-head,
