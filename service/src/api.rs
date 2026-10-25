@@ -17,6 +17,7 @@ use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::auth::{self, Auth};
 use crate::db::{Db, QueryError};
+use crate::gps;
 use crate::ingest::{self, IngestHandle, IngestItem};
 
 #[derive(Clone)]
@@ -60,6 +61,10 @@ pub fn router(state: AppState, ui_dir: PathBuf, tiles_dir: PathBuf, auth: Auth) 
         .route(
             "/api/ingest",
             post(ingest).layer(DefaultBodyLimit::max(body_limit)),
+        )
+        .route(
+            "/api/gps/{source}",
+            post(gps::upload).layer(DefaultBodyLimit::max(body_limit)),
         )
         .nest_service("/tiles", tiles)
         .fallback_service(spa)
@@ -173,7 +178,7 @@ async fn ingest(State(state): State<AppState>, body: Bytes) -> Response {
     (StatusCode::ACCEPTED, Json(json!({ "accepted": accepted }))).into_response()
 }
 
-enum ApiError {
+pub(crate) enum ApiError {
     BadRequest(String),
     Timeout,
     TooLarge(String),

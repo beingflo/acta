@@ -191,6 +191,16 @@ fn parse_timestamp_str(text: &str) -> Result<i64, String> {
     if let Ok(dt) = DateTime::parse_from_rfc3339(text) {
         return Ok(dt.timestamp_micros());
     }
+    // Overland writes `2015-10-01T08:00:00-0700`: an offset without the colon
+    // RFC 3339 requires, so it needs its own format before the naive fallbacks.
+    for format in [
+        "%Y-%m-%dT%H:%M:%S%.f%z",
+        "%Y-%m-%d %H:%M:%S%.f%z",
+    ] {
+        if let Ok(dt) = DateTime::parse_from_str(text, format) {
+            return Ok(dt.timestamp_micros());
+        }
+    }
     for format in ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%d %H:%M:%S%.f"] {
         if let Ok(naive) = NaiveDateTime::parse_from_str(text, format) {
             return Ok(Utc.from_utc_datetime(&naive).timestamp_micros());

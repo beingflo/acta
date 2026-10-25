@@ -25,7 +25,7 @@ See
 ## Auth
 
 Two HTTP basic credentials are configured through podman secrets. The UI credential guards the dashboard, the read
-API and the tile archives; the sensor credential may only `POST /api/ingest`, so a sensor password can be rotated
+API and the tile archives; the sensor credential may only write data (`POST /api/ingest`, `POST /api/gps/{source}`), so a sensor password can be rotated
 without touching the dashboard. `/health` stays public for the deploy script and any external probe. An
 unauthenticated request gets `401` with `WWW-Authenticate`, so a browser prompts once and then attaches the header to
 the same-origin `/api/data` and `/tiles/*` requests. With no UI credential configured, authentication is off, which is
@@ -51,6 +51,17 @@ in progress never holds up accepting the next batch; only a writer that cannot k
 is atomic: the file is written to `.staging/`, synced, and renamed into `data/`, so it becomes visible complete and is
 immediately queryable — hot data does not wait for compaction. The handler validates the batch and enqueues it; body
 size, batch length and backlog are all bounded, so a stalled writer applies backpressure instead of growing memory.
+
+### GPS
+
+`POST /api/gps/{source}` accepts the Overland iOS app's push body, `{"locations": [<GeoJSON Feature>, …]}`, and stores
+**one row per fix** under the source named in the path (`location_florian`). The reading time is the fix's own
+`properties.timestamp`, not the arrival time — a push carries the fixes accumulated since the previous one, so arrival
+time would collapse ten minutes of movement onto one instant. The feature is stored whole, so position fixes and the
+app's occasional `properties.type == "trip"` summaries share a source and the read path branches on that field.
+`current` is ignored. The array is unwrapped server-side because the app offers no way to reshape its body; `events`
+did the same, one span per fix, which is why the migrated rows are one per fix as well. The same handler accepts the
+sensor credential as basic auth or as `Authorization: Bearer <sensor password>`, the only scheme the app supports.
 
 ### Host statistics
 
@@ -218,7 +229,7 @@ Every setting is an environment variable; unset means the default. Sizes are byt
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `ACTA_AUTH_UI_USER` + `ACTA_AUTH_UI_PASSWORD` | unset | Enables authentication. The UI credential may reach every path. |
-| `ACTA_AUTH_SENSOR_USER` + `ACTA_AUTH_SENSOR_PASSWORD` | unset | Optional sensor credential; may only `POST /api/ingest`. |
+| `ACTA_AUTH_SENSOR_USER` + `ACTA_AUTH_SENSOR_PASSWORD` | unset | Optional sensor credential; may only `POST /api/ingest` and `POST /api/gps/{source}`. |
 
 Set each pair together. Setting only the sensor pair is a startup error (it would leave the UI open); with no UI
 credential, authentication is off. `mise run deploy:secrets` installs both pairs, usernames included, as podman

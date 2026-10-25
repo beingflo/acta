@@ -4,6 +4,7 @@ mod backup;
 mod compact;
 mod config;
 mod db;
+mod gps;
 mod ingest;
 mod parquet;
 mod storage;
