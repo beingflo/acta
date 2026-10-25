@@ -170,6 +170,12 @@ visited, pads and run-length encodes the qualifying cells into a GeoJSON MultiPo
 than a bounding box, and prints the matching `pmtiles extract --region=<file>` command per tier. High zoom is thus
 spent where the data actually is.
 
+A map that cannot start reports why on the tile: MapLibre raises the reason — no WebGL2 context, a tile answered
+`401`, a style resource that never arrives — as an exception or an error event, and a phone shows no console. The
+caption also appears when the style has not finished loading after ten seconds, which is the one failure MapLibre
+itself never reports. Neither the API nor the tile archives pass through the service worker, so a ranged read of a
+PMTiles archive always reaches the service directly.
+
 ### TODO add more later
 
 ## Summary strip

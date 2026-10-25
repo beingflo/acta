@@ -50,9 +50,12 @@ export default defineConfig({
       globPatterns: ['**/*.{js,css,html,svg,png}'],
       navigateFallback: '/index.html',
       // A dashboard is live data: the API and the tiles are never cached. A
-      // stale chart is worse than a chart that has to wait for the network.
+      // stale chart is worse than a chart that has to wait for the network. They
+      // get no runtime route either, so those requests never enter the worker at
+      // all — a `NetworkOnly` route would only add a hop, and the PMTiles
+      // archives are read with `Range:` requests, which are the last thing that
+      // should be re-issued by something in between.
       navigateFallbackDenylist: [/^\/api\//, /^\/tiles\//],
-      runtimeCaching: [{ urlPattern: /\/(api|tiles)\//, handler: 'NetworkOnly' }],
     },
   })],
   optimizeDeps: {

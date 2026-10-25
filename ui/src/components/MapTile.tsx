@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup, onMount } from 'solid-js'
+import { createEffect, createSignal, onCleanup, onMount, Show } from 'solid-js'
 import type { FeatureCollection } from 'geojson'
 import { Map as MapLibreMap, addProtocol, type GeoJSONSource, type StyleSpecification } from 'maplibre-gl'
 import { Protocol } from 'pmtiles'
@@ -35,6 +35,13 @@ type Fix = { lon: number; lat: number }
 type LocationMode = 'points' | 'line'
 
 let protocolRegistered = false
+
+/** The message of whatever MapLibre handed us: an `Error`, or a bare string. */
+function describe(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'string' && error) return error
+  return 'the map failed to start'
+}
 
 function buildStyle(): StyleSpecification {
   const base = layers('protomaps', namedFlavor(THEME), { lang: 'local' })
@@ -101,6 +108,14 @@ export default function MapTile() {
   const [mode, setMode] = createSignal<LocationMode>('line')
   const [hovered, setHovered] = createSignal(false)
 
+  // MapLibre reports a failure — no WebGL2 context, a tile answered 401, a style
+  // resource that never arrives — as a throw from its constructor or as an
+  // `error` event, and nowhere else. On a desktop that is a console line; on the
+  // phone this dashboard is mostly opened from, it is a white rectangle. Keep the
+  // first message on the tile itself.
+  const [failure, setFailure] = createSignal<string | null>(null)
+  const fail = (error: unknown) => setFailure((current) => current ?? describe(error))
+
   const applyData = () => {
     if (!map || !ready) return
     const points = map.getSource('location-points') as GeoJSONSource | undefined
@@ -130,16 +145,33 @@ export default function MapTile() {
       protocolRegistered = true
     }
 
-    map = new MapLibreMap({
-      container,
-      style: buildStyle(),
-      center: CENTER,
-      zoom: 12,
-      attributionControl: { compact: true },
-    })
+    try {
+      map = new MapLibreMap({
+        container,
+        style: buildStyle(),
+        center: CENTER,
+        zoom: 12,
+        attributionControl: { compact: true },
+      })
+    } catch (error) {
+      // The constructor throws when the browser cannot hand it a WebGL2 context
+      // (`GPUInitializationError`), which an older phone cannot. Everything below
+      // would throw in turn, so there is nothing left to set up.
+      fail(error)
+      return
+    }
+
+    // The sprite and the glyphs come from outside this service. A request that
+    // hangs rather than fails keeps `style.loaded()` false, so `load` never fires
+    // and no layer is ever added — silence rather than an error. Put a floor under
+    // that wait instead of showing nothing for as long as the tab is open.
+    const watchdog = window.setTimeout(() => {
+      if (!ready) fail('the map style did not finish loading')
+    }, 10_000)
 
     map.on('load', () => {
       if (!map) return
+      window.clearTimeout(watchdog)
       map.addSource('location-points', { type: 'geojson', data: toPoints([]) })
       map.addSource('location-line', { type: 'geojson', data: toLine([]) })
       // A white casing under the line keeps the track legible over street
@@ -175,7 +207,12 @@ export default function MapTile() {
       applyData()
       void loadFixes()
     })
-    map.on('error', (event) => console.error('map error', event.error))
+    map.on('error', (event) => {
+      console.error('map error', event.error)
+      // Once the style is up an error is one tile or one glyph range, and the map
+      // is still usable; before that it is the reason nothing is drawn.
+      if (!ready) fail(event.error)
+    })
 
     // `p` toggles points / line, but only while the pointer is over the map.
     const onKey = (event: KeyboardEvent) => {
@@ -195,6 +232,7 @@ export default function MapTile() {
 
     onCleanup(() => {
       window.removeEventListener('keydown', onKey)
+      window.clearTimeout(watchdog)
       observer.disconnect()
       map?.remove()
       map = undefined
@@ -221,6 +259,7 @@ export default function MapTile() {
       onMouseLeave={() => setHovered(false)}
     >
       <div class="map" ref={container} />
+      <Show when={failure()}>{(message) => <p class="map-failure">{message()}</p>}</Show>
     </section>
   )
 }

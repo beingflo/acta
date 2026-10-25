@@ -708,6 +708,25 @@ body.fullscreen-tile {
   inset: 0;
 }
 
+/* A map that cannot start used to be a blank tile: MapLibre puts the reason on
+   the console, which a phone cannot open. The caption is inert so it never eats
+   a pan, and it sits at the bottom so the attribution stays where it belongs. */
+.tile.map .map-failure {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 26px;
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #6b6b6b;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #e4e4e4;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
 /* Command palette: a hush over the page, and a panel that is mostly whitespace.
    No header rule and no full-width highlight band — the row under the pointer is
    a soft pill, and the only chrome is a hairline around the panel itself. */
