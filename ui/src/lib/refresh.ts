@@ -1,7 +1,7 @@
 /** Auto-refresh policy.
  *
  *  Only a live window is polled: a selection that ends at the wall clock and
- *  spans at most an hour (the 30m preset, or a custom range ending now). Any
+ *  spans at most an hour (the 1h preset, or a custom range ending now). Any
  *  other selection is a historical snapshot, fetched when it is chosen and then
  *  left alone — polling it would only repeat the same query. The `r` shortcut
  *  reloads the current view either way.

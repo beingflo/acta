@@ -204,9 +204,10 @@ load shows the spinner.
 
 ## Date range picker
 
-A fixed date range picker is always visible on the top right as a list of buttons: `all 1y 30d 7d 1d 6h 30m C`
+A fixed date range picker is always visible on the top right as a list of buttons: `all 1y 30d 7d 1d 6h 1h C`
 As an example, the 30d button sets the selected time range to `[now - 30d, now]`, while `all` spans the full data range
-(earliest to newest point). The C button opens from / to datetime inputs underneath for custom ranges.
+(earliest to newest point). The C button opens from / to datetime inputs underneath for custom ranges. A range renamed
+in the URL (`?range=30m`) still resolves to its replacement (`1h`), so an older link keeps working.
 
 A custom range whose end was within two minutes of the wall clock when it was chosen — a brush up to the right edge
 of a live chart, or the current minute in the inputs — keeps a live end: the start stays fixed and the end is resolved
@@ -234,7 +235,7 @@ whenever `all` is chosen.
 
 ## Refresh
 
-Only a live window is polled: a selection that ends at the wall clock and spans at most an hour — the 30m preset,
+Only a live window is polled: a selection that ends at the wall clock and spans at most an hour — the 1h preset,
 or a custom range ending now. It refreshes every 10 s, with a little jitter, so the dashboard follows a live feed; a
 small mark next to the range buttons says when this is on. Any other window is a historical snapshot, fetched when it
 is selected and then left alone, so 6h, 1d, 30d and `all` do not poll. Charts, tables and the scalar strips share the

@@ -2,7 +2,7 @@
 
 import { batch, createSignal } from 'solid-js'
 
-export type Preset = 'all' | '1y' | '30d' | '7d' | '1d' | '6h' | '30m' | 'custom'
+export type Preset = 'all' | '1y' | '30d' | '7d' | '1d' | '6h' | '1h' | 'custom'
 export type Range = {
   from: Date
   to: Date
@@ -19,7 +19,7 @@ export const PRESETS: { id: Exclude<Preset, 'custom'>; label: string }[] = [
   { id: '7d', label: '7d' },
   { id: '1d', label: '1d' },
   { id: '6h', label: '6h' },
-  { id: '30m', label: '30m' },
+  { id: '1h', label: '1h' },
 ]
 
 const [preset, setPresetSignal] = createSignal<Preset>('1d')
@@ -124,8 +124,8 @@ export function range(now = new Date()): Range {
 function shift(now: Date, preset: Exclude<Preset, 'custom' | 'all'>): Date {
   const date = new Date(now)
   switch (preset) {
-    case '30m':
-      date.setMinutes(date.getMinutes() - 30)
+    case '1h':
+      date.setHours(date.getHours() - 1)
       break
     case '6h':
       date.setHours(date.getHours() - 6)

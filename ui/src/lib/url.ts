@@ -7,7 +7,11 @@
 
 import { type Preset, type Range, endsNow, setCustomRange, setPreset } from './range'
 
-const SHORTHANDS: Preset[] = ['all', '1y', '30d', '7d', '1d', '6h', '30m']
+const SHORTHANDS: Preset[] = ['all', '1y', '30d', '7d', '1d', '6h', '1h']
+
+/** Presets that have been renamed. A link saved under the old name lands on the
+ *  window it meant, rather than silently falling back to the default. */
+const RENAMED_RANGES: Record<string, Preset> = { '30m': '1h' }
 
 export function dashboardPath(id: string): string {
   return `/${id}`
@@ -56,8 +60,11 @@ export function readRange(): { preset: Preset; custom: Range | null } {
     }
   }
 
-  const range = params.get('range') as Preset | null
-  if (range && SHORTHANDS.includes(range)) return { preset: range, custom: null }
+  const range = params.get('range')
+  if (range) {
+    const preset = RENAMED_RANGES[range] ?? (range as Preset)
+    if (SHORTHANDS.includes(preset)) return { preset, custom: null }
+  }
 
   return { preset: '1d', custom: null }
 }
