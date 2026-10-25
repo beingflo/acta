@@ -200,8 +200,8 @@ As an example, the 30d button sets the selected time range to `[now - 30d, now]`
 
 A custom range whose end was within two minutes of the wall clock when it was chosen — a brush up to the right edge
 of a live chart, or the current minute in the inputs — keeps a live end: the start stays fixed and the end is resolved
-to `now` on every query, so it still ends at the present after the tab has sat in the background. Any other custom
-range is fixed.
+to `now` on every query, so it still ends at the present after the tab has sat in the background. The end field shows
+that resolved value, so it advances with the clock while the panel is open. Any other custom range is fixed.
 
 `Ctrl+H` or `←` step the window back by its own length and `Ctrl+L` or `→` step it forward: with 30d selected,
 `Ctrl+H` gives `[now - 60d, now - 30d]`. A stepped window is no longer a preset, so it becomes a custom range.

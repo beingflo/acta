@@ -1,11 +1,32 @@
-import { For } from 'solid-js'
+import { createEffect, createSignal, For, on, onCleanup, onMount } from 'solid-js'
 
 import { PRESETS, preset, range, setCustomRange, setPreset } from '../lib/range'
+import { refreshTick } from '../lib/refresh'
 
 export default function RangePicker() {
   // The custom inputs are shown whenever the custom preset is active, whether it
   // was selected with the `C` button or by brushing a chart.
   const isCustom = () => preset() === 'custom'
+
+  // The end of a live range is "now", so the field showing it has to advance
+  // with the clock too: at once on `r`, otherwise every ten seconds while the
+  // panel is open. A focused field is left alone so typing is never overwritten.
+  const [clock, setClock] = createSignal(0)
+  const bump = () => setClock((n) => n + 1)
+  let toInput!: HTMLInputElement
+
+  createEffect(on(refreshTick, bump, { defer: true }))
+  onMount(() => {
+    const timer = window.setInterval(() => {
+      if (isCustom() && document.activeElement !== toInput) bump()
+    }, 10_000)
+    onCleanup(() => clearInterval(timer))
+  })
+
+  const toValue = () => {
+    clock() // track the clock as well as the selection
+    return toInputValue(range().to)
+  }
 
   const applyCustom = (from: string, to: string) => {
     const start = new Date(from)
@@ -47,8 +68,9 @@ export default function RangePicker() {
           />
           <span>→</span>
           <input
+            ref={toInput}
             type="datetime-local"
-            value={toInputValue(range().to)}
+            value={toValue()}
             onChange={(e) => applyCustom(toInputValue(range().from), e.currentTarget.value)}
           />
         </div>
