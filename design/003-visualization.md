@@ -110,10 +110,12 @@ screen.
 
 The server itself, sampled every 10 s by `stats/collect.py` — a systemd timer on the host, see
 `design/004-service.md` — into the `eos-stats` source: CPU usage and load, memory, disk space, network rates, battery
-charge and temperature, CPU temperature, and `podman stats` per container (once a minute, since that costs a process
-spawn rather than a file read).
+charge and temperature, and `podman stats` per container (once a minute, since that costs a process spawn rather than a
+file read). Linux exposes no CPU temperature on this hardware: the firmware holds the core sensors, but the Devicetree
+wires up only the NAND, the battery hotspot, the charge regulator and the WiFi module, so the temperature chart at the
+top is the hottest of those, a board-level proxy, and the battery reading is the one true temperature of a component.
 
-The charts show the gauges worth a line over time: CPU, CPU temperature, memory, load, the filesystem behind `/`,
+The charts show the gauges worth a line over time: CPU, board temperature, memory, load, the filesystem behind `/`,
 container CPU and memory, network in and out, battery charge and temperature. Percentages are pinned to a 0-100 y axis, so a busy hour
 and a quiet one are drawn to the same scale. Everything the collector sends beyond those charts (per container, per
 mount) is in the "Latest sample" tile, which prints the newest row of the source flattened to `path · value` rows: a

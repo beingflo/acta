@@ -28,10 +28,22 @@ All paths are relative to the row's `data` object:
 | `disk.boot_pct` | `/boot`'s share, when it is its own filesystem |
 | `network.rx_kbps`, `tx_kbps` | rates over the interval, all interfaces but `lo` |
 | `battery.charge_pct`, `temp_c`, `power_w`, `status` | `macsmc-battery` |
-| `temp.cpu_c` | hottest CPU thermal zone, °C |
+| `temp.board_c` | hottest of the temperature sensors the firmware exposes, °C |
 | `containers.<name>.cpu_pct`, `mem_mb`, `mem_pct` | `podman stats`, every 60 s |
 | `containers_total.cpu_pct`, `mem_mb`, `count` | totals across containers, every 60 s |
 | `containers_at` | epoch seconds of the last container sample |
+
+`board_c` is a board-level proxy, not a CPU temperature: Linux wires up only a few of the SMC's sensors — the NAND, the
+battery hotspot, the charge regulator, the WiFi module — and none of the CPU core keys macOS reads, so the hottest of
+those is the only thermal reading there is. A machine with no temperature sensor at all reports `null`.
+
+`cpu_pct` is a rate over the interval between two container samples, worked out
+from each container's CPU-time counter. podman's own percentage is not used for
+it: with `--no-stream` podman has no previous sample to subtract, so it divides
+by the container's whole life, and a spike then decays for hours instead of
+clearing with the next sample. On the first sample for a container — including
+any sample after the state file is lost — there is nothing to subtract yet, so
+podman's figure stands for that one point.
 
 Anything this machine does not have (no battery in a VM, no thermal zones) is
 `null` or missing rather than an error, so the collector keeps reporting what it

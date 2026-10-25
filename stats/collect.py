@@ -221,25 +221,42 @@ def battery() -> dict | None:
     return None
 
 
-def temperatures() -> dict | None:
-    """The hottest CPU thermal zone, in degrees Celsius."""
-    zones: dict[str, float] = {}
-    for zone in sorted(Path("/sys/class/thermal").glob("thermal_zone*")):
-        kind = (slurp(str(zone / "type")) or "").strip()
-        raw = (slurp(str(zone / "temp")) or "").strip()
-        try:
-            if kind and raw:
-                zones[kind] = round(int(raw) / 1000, 1)  # millidegrees
-        except ValueError:
-            continue
-    if not zones:
+def milli_celsius(reading: str) -> float | None:
+    """`26100` -> 26.1: hwmon and thermal zones both report millidegrees."""
+    try:
+        return round(int(reading.strip()) / 1000, 1)
+    except ValueError:
         return None
-    cpu = [value for kind, value in zones.items() if "cpu" in kind.lower()]
-    return {"cpu_c": max(cpu) if cpu else max(zones.values())}
 
 
-def containers() -> tuple[dict, dict]:
-    """CPU and memory per container, plus the totals across them."""
+def temperature() -> float | None:
+    """The hottest temperature sensor this machine exposes, in degrees Celsius.
+
+    Linux exposes no CPU temperature on Apple Silicon — the SMC holds those
+    sensors, but the Devicetree wires up only the board-level ones (NAND, battery
+    hotspot, charge regulator, WiFi module) — so their maximum is the hottest
+    reading there is. The battery has a field of its own; it is included here
+    too, and only wins when nothing else is warmer.
+    """
+    paths = [
+        *Path("/sys/class/hwmon").glob("hwmon*/temp*_input"),
+        *Path("/sys/class/thermal").glob("thermal_zone*/temp"),
+    ]
+    readings = [milli_celsius(slurp(str(path)) or "") for path in sorted(paths)]
+    found = [value for value in readings if value is not None]
+    return max(found) if found else None
+
+
+def containers() -> dict:
+    """CPU and memory per container.
+
+    `cpu_ns` is the container's total CPU time, which the caller subtracts from
+    the previous reading to get a rate. The `cpu_pct` alongside it is podman's
+    own figure, and on its own it is useless over time: without a previous
+    sample `podman stats --no-stream` divides by the whole life of the
+    container, so a spike keeps decaying for hours. It survives only as the
+    first value for a container, where there is nothing to subtract yet.
+    """
     stats: dict[str, dict] = {}
     try:
         result = subprocess.run(
@@ -248,7 +265,7 @@ def containers() -> tuple[dict, dict]:
                 "stats",
                 "--no-stream",
                 "--format",
-                "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}",
+                "{{.Name}}\t{{.CPUPerc}}\t{{.CPUNano}}\t{{.MemUsage}}\t{{.MemPerc}}",
             ],
             capture_output=True,
             text=True,
@@ -256,24 +273,29 @@ def containers() -> tuple[dict, dict]:
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
-        return stats, {"cpu_pct": 0.0, "mem_mb": 0.0, "count": 0}
+        return stats
     for line in result.stdout.splitlines():
         name, _, rest = line.partition("\t")
         fields = rest.split("\t")
-        if not name or len(fields) < 2:
+        if not name or len(fields) < 3:
             continue
         # MemUsage looks like "12.4MB / 16GB"; the first half is what is in use.
         stats[name] = {
             "cpu_pct": number(fields[0]),
-            "mem_mb": size_mb(fields[1].split("/")[0]),
-            "mem_pct": number(fields[2]) if len(fields) > 2 else None,
+            "cpu_ns": int(fields[1]) if fields[1].strip().isdigit() else None,
+            "mem_mb": size_mb(fields[2].split("/")[0]),
+            "mem_pct": number(fields[3]) if len(fields) > 3 else None,
         }
-    total = {
+    return stats
+
+
+def container_totals(stats: dict) -> dict:
+    """The totals across the containers, once their CPU shares are known."""
+    return {
         "cpu_pct": round(sum(entry["cpu_pct"] or 0 for entry in stats.values()), 1),
         "mem_mb": round(sum(entry["mem_mb"] or 0 for entry in stats.values()), 1),
         "count": len(stats),
     }
-    return stats, total
 
 
 def load_averages() -> tuple[float, float, float]:
@@ -296,12 +318,18 @@ def sample(previous: dict | None) -> tuple[dict, dict]:
     total, idle = cpu_totals()
     received, sent = net_totals()
     load1, load5, load15 = load_averages()
+    hottest = temperature()
     uptime = (slurp("/proc/uptime") or "").split()
     now = time.time()
     # The last container sample, so a row without containers still says how old
     # the figures it is missing are.
-    containers_at = previous.get("containers_at") if previous else None
+    earlier = previous or {}
+    containers_at = earlier.get("containers_at")
     due = containers_at is None or now - containers_at >= CONTAINER_INTERVAL_S
+    # CPU time read last time, and when it was read: the baseline this run
+    # subtracts from.
+    cpu_ns = dict(earlier.get("containers_cpu") or {})
+    cpu_ns_at = earlier.get("containers_cpu_at")
 
     data = {
         "host": os.uname().nodename,
@@ -312,11 +340,28 @@ def sample(previous: dict | None) -> tuple[dict, dict]:
         "memory": memory(),
         "disk": disks(),
         "battery": battery(),
-        "temp": temperatures(),
+        "temp": {"board_c": hottest} if hottest is not None else None,
         "containers_at": containers_at,
     }
     if due:
-        data["containers"], data["containers_total"] = containers()
+        stats = containers()
+        for name, entry in stats.items():
+            total_ns = entry.pop("cpu_ns")
+            before = cpu_ns.get(name)
+            if total_ns is not None:
+                cpu_ns[name] = total_ns
+            # Two readings of the container's CPU time give the rate over the
+            # span between them, which is what the graph is asking for. A
+            # counter that went backwards means the container restarted since,
+            # so podman's own figure is all there is to report.
+            if total_ns is not None and before is not None and total_ns > before:
+                span = now - cpu_ns_at if cpu_ns_at else 0
+                if span > 0:
+                    entry["cpu_pct"] = round(100 * (total_ns - before) / (span * 1e9), 1)
+        if stats:
+            cpu_ns_at = now
+        data["containers"] = stats
+        data["containers_total"] = container_totals(stats)
         data["containers_at"] = containers_at = now
 
     # Rates need two readings. The first run after boot only reports gauges; the
@@ -340,6 +385,8 @@ def sample(previous: dict | None) -> tuple[dict, dict]:
         "rx": received,
         "tx": sent,
         "containers_at": containers_at,
+        "containers_cpu": cpu_ns,
+        "containers_cpu_at": cpu_ns_at,
     }
     return data, counters
 

@@ -388,7 +388,7 @@ class EosStats:
         self.booted = utc_now() - timedelta(days=rng.uniform(2, 40))
         self.last_at: datetime | None = None
         self.load = rng.uniform(0.05, 0.6)
-        self.temp_c = rng.uniform(42, 55)
+        self.temp_c = rng.uniform(26, 32)
         self.used_mb = rng.uniform(3_500, 6_000)
         self.used_gb = rng.uniform(60, 95)
         self.boot_pct = rng.uniform(18, 40)
@@ -415,10 +415,13 @@ class EosStats:
         usage = clamp(self.load * 100 / self.CORES + r.gauss(0, 4), 0.3, 100)
         if r.random() < 0.01:
             usage = clamp(usage + r.uniform(15, 45), 0.3, 100)
+        # Board temperature: the hottest SMC sensor the firmware exposes, so it
+        # follows the load only loosely — warmer than the battery, nowhere near
+        # a SoC.
         self.temp_c = clamp(
-            self.temp_c + (42 + 0.4 * usage - self.temp_c) * 0.08 + r.gauss(0, 0.3),
-            28.0,
-            98.0,
+            self.temp_c + (29 + 0.06 * usage - self.temp_c) * 0.08 + r.gauss(0, 0.15),
+            22.0,
+            55.0,
         )
 
         self.used_mb = clamp(self.used_mb + r.gauss(0, 30), 2_000, self.MEMORY_TOTAL_MB - 200)
@@ -468,7 +471,7 @@ class EosStats:
                 "power_w": round(self.power_w, 1),
                 "status": "Charging" if self.charging else "Discharging",
             },
-            "temp": {"cpu_c": round(self.temp_c, 1)},
+            "temp": {"board_c": round(self.temp_c, 1)},
             "containers_at": self.containers_at.timestamp() if self.containers_at else None,
         }
 

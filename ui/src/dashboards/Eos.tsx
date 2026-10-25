@@ -10,7 +10,7 @@ const gauge = (path: string) => `avg(${path}::DOUBLE)`
 /**
  * The server itself: CPU, memory, containers, disk, network, battery. The tiles
  * below are the gauges worth a line over time; everything else the collector
- * sends (per container, per mount, per thermal zone) is in the last tile.
+ * sends (per container, per mount) is in the last tile.
  */
 export default function Eos() {
   return (
@@ -24,10 +24,10 @@ export default function Eos() {
         series={[{ label: 'CPU', expr: gauge('data.cpu.usage_pct') }]}
       />
       <TimeSeriesTile
-        title="CPU temperature"
+        title="Board temperature"
         source={SOURCE}
         yLabel="Temperature [°C]"
-        series={[{ label: 'CPU', expr: gauge('data.temp.cpu_c') }]}
+        series={[{ label: 'Board', expr: gauge('data.temp.board_c') }]}
       />
       <TimeSeriesTile
         title="Memory"
