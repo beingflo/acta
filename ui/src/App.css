@@ -750,6 +750,102 @@ body.fullscreen-tile {
   pointer-events: none;
 }
 
+
+/* The day lane: a grid, not a chart. Day labels on the left, one column per hour,
+   cell filled where the last known position was inside the office box. */
+.lane {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-top: 6px;
+}
+
+.lane-hours,
+.lane-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.lane-hours {
+  font-size: 10px;
+  color: #a8a8a8;
+  font-variant-numeric: tabular-nums;
+}
+
+/* One mark per hour, each taking the width of that hour's two half-hour cells:
+   same flex basis and same 1px gap as the cells, so a mark sits centred over the
+   pair rather than drifting along the row. */
+.lane-hour-marks {
+  display: flex;
+  flex: 1;
+  gap: 1px;
+  min-width: 0;
+}
+
+.lane-hour-marks span {
+  flex: 1;
+  text-align: center;
+}
+
+.lane-row {
+  /* Set per lane: a year of rows share a fixed height between them. */
+  height: var(--lane-row, 13px);
+}
+
+.lane-day {
+  width: 34px;
+  flex: none;
+  font-size: 9px;
+  color: #a8a8a8;
+  font-variant-numeric: tabular-nums;
+}
+
+.lane-cells {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.lane-cell {
+  height: calc(var(--lane-row, 13px) - 2px);
+  background: #f4f4f4;
+  border-radius: 1px;
+}
+
+.lane-cell.inside {
+  background: hsl(150, 28%, 42%);
+}
+
+/* A weekend row is tinted rather than left looking like missing data. The green
+   stays green: a day worked at the weekend should still read as one. */
+.lane-row.weekend .lane-cell:not(.inside) {
+  background: #ece8e1;
+}
+
+.lane-row.weekend .lane-day {
+  color: #c6c2bb;
+}
+
+/* A maximized lane spreads its rows over the viewport instead of stacking them
+   at the top. */
+.tile.lane.fullscreen .lane {
+  height: 100%;
+  padding-bottom: 10px;
+}
+
+.tile.lane.fullscreen .lane-row {
+  flex: 1;
+  height: auto;
+}
+
+.tile.lane.fullscreen .lane-cell {
+  height: 100%;
+}
+
 /* Command palette: a hush over the page, and a panel that is mostly whitespace.
    No header rule and no full-width highlight band — the row under the pointer is
    a soft pill, and the only chrome is a hairline around the panel itself. */

@@ -4,6 +4,7 @@ import Acta from './Acta'
 import Eos from './Eos'
 import Home from './Home'
 import Marending from './Marending'
+import Work from './Work'
 
 // Lazy: pulls MapLibre (and its worker) into a separate chunk, loaded only when
 // the Location dashboard is opened.
@@ -24,4 +25,5 @@ export const DASHBOARDS: Dashboard[] = [
   { id: 'eos', title: 'eos', component: Eos },
   { id: 'marending', title: 'marending', component: Marending },
   { id: 'location', title: 'location', component: Location },
+  { id: 'work', title: 'work', component: Work },
 ]

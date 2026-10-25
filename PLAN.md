@@ -22,9 +22,9 @@ This document outlines the phases of development of Acta.
 [x] Build endpoint that accepts GPS data
 [x] Build authentication
 [x] Deploy Acta to server
-[ ] Switch over existing integrations
+[x] Switch over existing integrations
 
 ## Phase 4: Finalize
 
 [x] Collect server health stats
-[ ] Add all desired visualizations
+[x] Add all desired visualizations

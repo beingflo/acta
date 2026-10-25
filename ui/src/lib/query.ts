@@ -501,3 +501,203 @@ FROM (
   LIMIT ${limit} OFFSET ${offset}
 )`
 }
+
+/** The office, as a box of degrees: `[min, max]` per axis. At 47° N a thousandth
+ *  of a degree is ~111 m of latitude but ~76 m of longitude, so a box with equal
+ *  spans on both axes is not square on the ground. */
+const OFFICE = {
+  lon: [8.513608, 8.515311] as [number, number],
+  lat: [47.378058, 47.379233] as [number, number],
+}
+
+/** One position fix's coordinates. `TRY_CAST` because the same source also
+ *  carries `trip` features, whose geometry is not a point: a plain cast would
+ *  fail on them in a `FILTER`, where DuckDB is free to evaluate the condition
+ *  before the `type` test. DuckDB arrays are 1-based, so longitude is `[1]`. */
+const FIX_LON = 'TRY_CAST(data.geometry.coordinates[1] AS DOUBLE)'
+const FIX_LAT = 'TRY_CAST(data.geometry.coordinates[2] AS DOUBLE)'
+const IS_FIX = `data.geometry.type = 'Point'`
+
+/** A fix inside the office box. */
+const AT_OFFICE = `${IS_FIX}
+    AND ${FIX_LON} BETWEEN ${OFFICE.lon[0]} AND ${OFFICE.lon[1]}
+    AND ${FIX_LAT} BETWEEN ${OFFICE.lat[0]} AND ${OFFICE.lat[1]}`
+
+/**
+ * Every fix in the window with its state — `1` inside the office box, `0` out —
+ * as epoch seconds, one point per fix and no bucketing.
+ *
+ * The presence chart draws a step at each of those instants, so quantising them
+ * would do two kinds of damage. A bucket moves an arrival or a departure by up to
+ * its own width, and — worse — an aggregate has to pick a state for a bucket that
+ * holds a whole walk: the fixes of a walk-in start outside and end inside, so
+ * whichever end the aggregate takes, half the burst is wrong. Since the tracker
+ * reports only while moving, one point per fix is both exact and small: a year is
+ * a few thousand rows.
+ */
+export function officeFixesSql(from: Date, to: Date): string {
+  return `SELECT coalesce(to_json(array_agg(struct_pack(t := t, s0 := inside) ORDER BY t)),
+           '[]'::JSON)::VARCHAR
+FROM (
+  SELECT epoch(CAST(timestamp AS TIMESTAMP)) AS t,
+         CASE WHEN ${AT_OFFICE} THEN 1 ELSE 0 END AS inside
+  FROM events
+  WHERE source = 'location_florian' AND ${IS_FIX}
+    AND timestamp >= TIMESTAMPTZ '${from.toISOString()}'
+    AND timestamp <  TIMESTAMPTZ '${to.toISOString()}'
+)`
+}
+
+/** When the office was reached, as epoch seconds, `null` if it was not. */
+export type OfficeArrivals = {
+  morning: number | null
+  after_lunch: number | null
+}
+
+/**
+ * The first fix inside the office box in each arrival window — an *arrival*
+ * meaning a fix whose predecessor was outside, not merely the first fix that
+ * happens to be inside.
+ *
+ * The difference is not academic: a wider box covers the walk to the door, so
+ * "first fix inside after 11:30" is the moment someone last stood at their desk
+ * before lunch rather than the moment they came back. Requiring the crossing
+ * makes both cards mean what their labels say, and leaves the morning identical
+ * — that one is always a crossing.
+ *
+ * The windows are given as instants rather than derived from the selected range:
+ * these two times are a property of the day, not of what the chart below is
+ * showing. The fix list starts a day before the first window so that a fix at
+ * the very start of it has a predecessor; it is still only a couple of days of
+ * rows, materialised once and read twice.
+ */
+export function officeArrivalsSql(windows: {
+  morning: [Date, Date]
+  after_lunch: [Date, Date]
+}): string {
+  const start = new Date(
+    Math.min(windows.morning[0].getTime(), windows.after_lunch[0].getTime()) - 86_400_000,
+  )
+  const end = new Date(
+    Math.max(windows.morning[1].getTime(), windows.after_lunch[1].getTime()),
+  )
+  const first = ([from, to]: [Date, Date]) => `(SELECT min(epoch(CAST(ts AS TIMESTAMP)))
+           FROM crossings
+           WHERE ts >= TIMESTAMPTZ '${from.toISOString()}'
+             AND ts <  TIMESTAMPTZ '${to.toISOString()}')`
+  return `WITH fixes AS (
+         SELECT timestamp AS ts,
+                CASE WHEN ${AT_OFFICE} THEN 1 ELSE 0 END AS inside,
+                lag(CASE WHEN ${AT_OFFICE} THEN 1 ELSE 0 END) OVER (ORDER BY timestamp) AS before
+         FROM events
+         WHERE source = 'location_florian' AND ${IS_FIX}
+           AND timestamp >= TIMESTAMPTZ '${start.toISOString()}'
+           AND timestamp <  TIMESTAMPTZ '${end.toISOString()}'
+       ), crossings AS (
+         -- coalesce(before, 0): the first fix of the lookback counts as arriving
+         -- if it is inside, which is the honest reading of "was already there".
+         SELECT ts FROM fixes WHERE inside = 1 AND coalesce(before, 0) = 0
+       )
+       SELECT to_json(struct_pack(
+         morning := ${first(windows.morning)},
+         after_lunch := ${first(windows.after_lunch)}
+       ))::VARCHAR`
+}
+
+/**
+ * The local day the window ends in.
+ *
+ * The window is half-open (`[from, to)`), so the last instant inside it decides:
+ * a live range ends now and means today, a range stepped back a day means
+ * yesterday, and a window ending exactly at midnight belongs to the day before.
+ */
+export function rangeDay(to: Date): Date {
+  const last = new Date(to.getTime() - 1)
+  return new Date(last.getFullYear(), last.getMonth(), last.getDate())
+}
+
+/**
+ * The weekends inside a window, as epoch-second pairs, for shading a chart.
+ *
+ * A band runs from one Saturday's midnight to the following Monday's, so a
+ * window that starts on a Sunday gets a band already in progress — the chart
+ * clamps it to the plot. Local days again: what counts as a weekend is the
+ * calendar's business, not SQL's.
+ */
+export function weekendRanges(from: Date, to: Date): Array<[number, number]> {
+  const ranges: Array<[number, number]> = []
+  const first = new Date(from.getFullYear(), from.getMonth(), from.getDate())
+  for (let at = first; at < to; ) {
+    // Only Saturdays open a band; the Sunday that follows is inside it.
+    if (at.getDay() === 6) {
+      const monday = new Date(at.getFullYear(), at.getMonth(), at.getDate() + 2)
+      ranges.push([at.getTime() / 1000, monday.getTime() / 1000])
+    }
+    at = new Date(at.getFullYear(), at.getMonth(), at.getDate() + 1)
+  }
+  return ranges
+}
+
+/**
+ * The local days a window is *about*, as the two instants bracketing each one:
+ * the day it ends in and as many before it as the window is long, oldest first.
+ *
+ * Counting back from the end rather than walking forward from the start is what
+ * makes a preset match its own name. A `1d` window runs from now to now, so it
+ * touches two calendar days — but the earlier one only holds the tail of a day
+ * it did not start in, which is empty by construction, and a lane showing an
+ * empty row for it looks broken. `7d` therefore means the end day and the six
+ * before it.
+ *
+ * The boundaries are built here rather than in SQL because DuckDB's bundled build
+ * has no timezone database: "local midnight" is the browser's business, DST
+ * included. The clip keeps a range of years from turning into a wall of rows.
+ */
+export function localDays(from: Date, to: Date, limit = 60): Array<[Date, Date]> {
+  const end = rangeDay(to)
+  const span = to.getTime() - from.getTime()
+  const count = Math.min(Math.max(1, Math.round(span / 86_400_000)), Math.max(1, limit))
+
+  const days: Array<[Date, Date]> = []
+  for (let back = count - 1; back >= 0; back--) {
+    const start = new Date(end.getFullYear(), end.getMonth(), end.getDate() - back)
+    // `Date(y, m, d + 1)` walks the calendar in local time, so a DST change
+    // shifts the clock rather than the day.
+    days.push([start, new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1)])
+  }
+  return days
+}
+
+/** One hour of the day lane: a day's start in epoch seconds and the state of the
+ *  office at that hour, `1` inside and `0` outside. */
+export type OfficeHour = { t: number; s0: number }
+
+/**
+ * The office as a state per quarter hour, for the day lane — one query over the
+ * whole clipped window rather than one per column.
+ *
+ * The state is the one at the bucket's *last* fix, not its first. A burst of
+ * fixes is a walk: it starts outside and ends where the walk ended, so the first
+ * fix of a slot spent arriving says "out" while the last one says "in". Taking
+ * the last also makes the carry right, since a quiet slot inherits the state the
+ * one before it ended in.
+ *
+ * Reply rows are *sparse*: only slots with a fix in them appear, so the lane
+ * carries the last known state forward across the quiet ones. Buckets are
+ * UTC-aligned quarter hours, which map onto local quarter hours wherever the
+ * offset is a whole number of quarters.
+ */
+export function officeHoursSql(days: Array<[Date, Date]>): string {
+  return `SELECT coalesce(to_json(array_agg(struct_pack(t := b, s0 := st) ORDER BY b)),
+           '[]'::JSON)::VARCHAR
+FROM (
+  SELECT epoch(time_bucket(INTERVAL '15 MINUTE', CAST(timestamp AS TIMESTAMP))) AS b,
+         arg_max(CASE WHEN ${AT_OFFICE} THEN 1 ELSE 0 END,
+                 CAST(timestamp AS TIMESTAMP)) AS st
+  FROM events
+  WHERE source = 'location_florian' AND ${IS_FIX}
+    AND timestamp >= TIMESTAMPTZ '${days[0]?.[0].toISOString() ?? '1970-01-01T00:00:00.000Z'}'
+    AND timestamp <  TIMESTAMPTZ '${days[days.length - 1]?.[1].toISOString() ?? '1970-01-01T00:00:00.000Z'}'
+  GROUP BY 1
+)`
+}

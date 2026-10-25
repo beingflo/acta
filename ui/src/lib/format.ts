@@ -67,12 +67,13 @@ export function formatBucket(ms: number): string {
   return `${Math.round(ms / 86_400_000)} d`
 }
 
-/** Local time, at the detail the selected window can support: a multi-year
- *  window needs a date, a window of milliseconds needs its milliseconds. */
+/** Local time, at the detail the selected window can support: a window of
+ *  milliseconds needs its milliseconds. The clock is always part of it, however
+ *  wide the window — a tooltip that only names the day leaves the reader guessing
+ *  which hour of it they are pointing at. */
 export function formatTimestamp(seconds: number, spanMs: number): string {
   const date = new Date(seconds * 1000)
   const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-  if (spanMs > 30 * 86_400_000) return day
   let clock = `${pad(date.getHours())}:${pad(date.getMinutes())}`
   if (spanMs <= 3_600_000) clock += `:${pad(date.getSeconds())}`
   if (spanMs <= 2_000) clock += `.${pad(date.getMilliseconds(), 3)}`
@@ -88,6 +89,12 @@ export function tableTimeParts(us: number): { day: string; clock: string } {
     day: `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()}`,
     clock: `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`,
   }
+}
+
+/** `HH:MM` in local time, for a time of day rather than an instant. */
+export function formatClock(seconds: number): string {
+  const date = new Date(seconds * 1000)
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 /** The `[ppm]` part of a y-label, if it has one. */

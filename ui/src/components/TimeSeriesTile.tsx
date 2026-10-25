@@ -38,6 +38,26 @@ const measure = (() => {
   }
 })()
 
+/** Fill the shaded ranges over the plot area, clipped to it. */
+const shadePlot = (self: uPlot, ranges: Array<[number, number]>) => {
+  const { ctx, bbox } = self
+  const [left, right] = [bbox.left, bbox.left + bbox.width]
+  // `valToPos` measures from the canvas origin, not from the plot area, so the
+  // axis width has to be added back — without it every band sits left of where
+  // it belongs, by exactly the width of the y axis.
+  const xAt = (value: number) => self.valToPos(value, 'x', false) + bbox.left
+
+  ctx.save()
+  // The same warm grey the day lane tints its weekend rows with.
+  ctx.fillStyle = 'rgba(120, 110, 95, 0.07)'
+  for (const [from, to] of ranges) {
+    const a = Math.max(left, Math.round(xAt(from)))
+    const b = Math.min(right, Math.round(xAt(to)))
+    if (b > a) ctx.fillRect(a, bbox.top, b - a, bbox.height)
+  }
+  ctx.restore()
+}
+
 /** Room for `rows` lines of tick label, plus the ticks themselves. */
 const tickRoom = (rows: number) => AXIS_TICK + AXIS_GAP + rows * AXIS_LINE
 
@@ -127,6 +147,31 @@ export default function TimeSeriesTile(props: {
   fills?: string[]
   /** Fixed y bounds, for a value with a natural scale such as a percentage. */
   yRange?: [number, number]
+  /**
+   * Draw the line as a step: each value holds until the next point. For a state
+   * that persists between samples, where a diagonal would invent a crossing the
+   * data never showed — at the office until the next fix.
+   */
+  step?: boolean
+  /** Names for the y axis' ticks, which uPlot otherwise prints as raw numbers:
+   *  `(minutes) => '07:30'` for a time of day, or `in`/`out` for a state. */
+  yTicks?: (value: number) => string
+  /** Label only the ends of `yRange` and draw no ticks between them, for an
+   *  axis that is a state rather than a quantity. */
+  yTickEnds?: boolean
+  /**
+   * A whole query instead of the aggregate `series`, for a series no bucket
+   * aggregate can express — the fixes themselves, say, where quantising would
+   * move the steps. It must return the usual `[{ t, s0, … }]` JSON; `series` then
+   * only names the columns, its `expr` unused.
+   */
+  query?: (from: Date, to: Date) => string
+  /**
+   * Ranges to shade behind the plot, as epoch seconds — weekends, so a flat line
+   * across one reads as a day off rather than as missing data. Asked for on every
+   * draw, so it follows the selected range without rebuilding the chart.
+   */
+  shade?: () => Array<[number, number]>
 }) {
   // A metric tile has exactly one series; a SQL tile has as many as it was
   // given. Everything below reads `series()` rather than the prop.
@@ -328,6 +373,11 @@ export default function TimeSeriesTile(props: {
               // in; connect across it, as uPlot already does across a bucket that
               // has no rows at all.
               spanGaps: true,
+              // A bucket without a fix is not a change of state: the step holds
+              // the previous one until the next fix arrives. Spread rather than
+              // set to undefined — uPlot merges options over its defaults, and an
+              // explicit `paths: undefined` leaves it with no path builder at all.
+              ...(props.step ? { paths: uPlot.paths.stepped!({ align: 1 }) } : {}),
               points: { show: () => showDots, size: 4, width: 1, stroke: STROKE, fill: STROKE },
             },
       ),
@@ -359,6 +409,16 @@ export default function TimeSeriesTile(props: {
         font: AXIS_FONT,
         grid: { stroke: '#f0f0f0', width: 1 },
         ticks: { stroke: '#e0e0e0', width: 1 },
+        // Spread rather than set to `undefined`: uPlot merges options over its
+        // own defaults, so an explicit `values: undefined` replaces the formatter
+        // it would have used and the axis throws on every frame.
+        // A state axis has no values worth reading between its ends.
+        ...(props.yTickEnds && props.yRange
+          ? { splits: (_self: uPlot, _axis: number, _min: number, _max: number) => [props.yRange![0], props.yRange![1]] }
+          : {}),
+        ...(props.yTicks
+          ? { values: (_self: uPlot, splits: number[]) => splits.map((split) => props.yTicks!(split)) }
+          : {}),
         // As wide as the widest value it has to print, not a fixed 50px.
         size: (_self, values) =>
           tickRoom(1) + Math.max(0, ...(values ?? []).map((value) => measure(String(value ?? '')))),
@@ -397,6 +457,13 @@ export default function TimeSeriesTile(props: {
       },
     },
     hooks: {
+      ...(props.shade
+        ? {
+            // `drawClear` rather than `draw`: the bands belong under the series,
+            // and it runs after the canvas is wiped but before anything is drawn.
+            drawClear: [(self: uPlot) => shadePlot(self, props.shade!())],
+          }
+        : {}),
       setCursor: [(self) => updateTooltip(self)],
       setSelect: [(self) => settleSelection(self)],
     },
@@ -437,13 +504,19 @@ export default function TimeSeriesTile(props: {
     // get the complete bucket grid; a line just connects across a quiet spell.
     const bucket = bucketFor(from, to, chartWidth, props.bars ? BAR_BUCKET_PX : 1)
     if (props.bars) setBarMs(bucket.ms)
-    const sql = timeSeriesSql({
-      source: props.source,
-      series: series(),
-      bucket: bucket.sql,
-      from,
-      to,
-    })
+    const sql = props.query
+      ? props.query(from, to)
+      : timeSeriesSql({
+          source: props.source,
+          series: series(),
+          bucket: bucket.sql,
+          from,
+          to,
+        })
+
+    // uPlot draws the epoch when the scale is unset, so a tile that is still
+    // loading (or whose query failed) would show 1970 on its axis.
+    xWindow = [from.getTime() / 1000, to.getTime() / 1000]
 
     const request = ++requestId
     if (!background) setLoading(true)

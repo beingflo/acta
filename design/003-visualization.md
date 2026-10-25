@@ -195,6 +195,45 @@ caption also appears when the style has not finished loading after ten seconds, 
 itself never reports. Neither the API nor the tile archives pass through the service worker, so a ranged read of a
 PMTiles archive always reaches the service directly.
 
+### work
+
+The office day, from a geofence around the office: two scalars saying when the office was reached, then presence over the
+selected range. The fence is a box of degrees in `ui/src/lib/query.ts` — the bundled DuckDB has no `spatial`
+extension, so being inside is two `BETWEEN`s on the coordinates the location query already extracts. It is a constant
+in the frontend rather than a secret: the app shell is public, so a coordinate in the bundle is published either way,
+and the place is not a credential.
+
+The scalars are the first *crossing* into the box in two windows of the day — morning `06:00–11:00` and after lunch
+`11:30–15:00`, local time — and they answer for the calendar day the *selected range ends in*. A crossing means the fix
+follows one that was outside: a box wide enough to cover the walk to the front door otherwise reports the last minute at
+the desk before lunch as the return from it, which on nine of ten days was minutes to an hour early. The morning is
+unaffected — that arrival is always a crossing — and the query materialises a day's fixes plus a day of lookback, so
+asking for the predecessor costs nothing measurable. Stepping the range back a
+day therefore shows that day's times, and a window ending at midnight belongs to the day before, because ranges are
+half-open. A rolling 24 hours is deliberately not used: it would show yesterday's afternoon under today's heading. The
+day's windows are given to the query as instants, so the date arithmetic stays in the browser, where local time and its
+DST rules live.
+
+Below it, the same question at another scale. A **day lane**: one row per day — the day the range ends in, and as
+many before it as the range is long, so `1d` is one row and `7d` is seven — one column per quarter hour between 06:00 and
+21:00 — the hours anyone is at the office — filled where the last known
+position was inside the box — a grid rather than a chart, since the
+point is to read a month at a glance. A day is only filled between its own first and last fix: the state holds forward
+between fixes, but before the first and after the last one the phone was merely silent, and claiming a night at the
+office from that silence is how the first version filled whole days. The day boundaries are built in the browser
+because DuckDB's bundled build has no timezone database, so local midnight and DST are the platform's business. The
+location dashboard's map is where the box gets checked against the ground truth; this one does not need a second one.
+
+The presence chart is a step, not a percentage, and it is drawn through the fixes themselves rather than through
+buckets. The tracker reports only when the phone moves — standing at a desk produces nothing at all — so the state
+between two fixes is the last one seen, held until the next, and a share of samples would call a whole morning at the
+office "mostly absent". Bucketing would do a second kind of damage: the fixes of a walk-in start outside and end
+inside, so a bucket that holds a whole walk has to pick one of the two and gets half of it wrong, and any bucket width
+moves an arrival or a departure by up to that width. One point per fix is exact, and small enough to send whole: a year
+is a few thousand rows. `trip` summaries carry no position and are filtered out, so they can never read as "away". The
+weekends are shaded behind it in the same warm grey the lane tints its weekend rows with, so the flat stretch across a
+Saturday reads as a day off rather than as data that stopped arriving.
+
 ### TODO add more later
 
 ## Summary strip
