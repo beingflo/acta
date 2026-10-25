@@ -4,10 +4,8 @@ import { fetchData } from '../lib/api'
 import { byteParts, formatAge, formatCompact, formatNumber } from '../lib/format'
 import { type FileStats, filesSql, type Overview, overviewSql } from '../lib/query'
 import { range } from '../lib/range'
+import { autoRefresh } from '../lib/refresh'
 import StatsStrip, { type Stat } from './StatsStrip'
-
-const REFRESH_MS = 30_000
-const JITTER_MS = 5_000
 
 /**
  * Scalars above the acta dashboard: how much is stored, how quickly it is
@@ -44,16 +42,8 @@ export default function ActaStats() {
   })
 
   onMount(() => {
-    let timer = 0
-    const schedule = () => {
-      timer = window.setTimeout(async () => {
-        await load()
-        schedule()
-      }, REFRESH_MS + Math.random() * JITTER_MS)
-    }
-    schedule()
+    onCleanup(autoRefresh(load))
     onCleanup(() => {
-      clearTimeout(timer)
       requestId++ // drop replies that are still in flight
     })
   })

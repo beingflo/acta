@@ -5,7 +5,7 @@
  *   ?from=2026-10-10T…&to=…     custom range (ISO, UTC)
  */
 
-import { type Preset, type Range, setCustomRange, setPreset } from './range'
+import { type Preset, type Range, endsNow, setCustomRange, setPreset } from './range'
 
 const SHORTHANDS: Preset[] = ['all', '1y', '30d', '7d', '1d', '6h', '30m']
 
@@ -36,11 +36,23 @@ export function readRange(): { preset: Preset; custom: Range | null } {
 
   const from = params.get('from')
   const to = params.get('to')
-  if (from && to) {
+  if (from) {
     const start = new Date(from)
-    const end = new Date(to)
-    if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end > start) {
-      return { preset: 'custom', custom: { from: start, to: end } }
+    if (!Number.isNaN(start.getTime())) {
+      // No `to` means the end follows the clock: that is how a live custom
+      // range is written, so reopening the URL keeps ending at the new now.
+      if (!to) {
+        if (start.getTime() < Date.now()) {
+          return { preset: 'custom', custom: { from: start, to: new Date(), liveEnd: true } }
+        }
+      } else {
+        const end = new Date(to)
+        if (!Number.isNaN(end.getTime()) && end > start) {
+          // A URL written moments ago still ends "now"; an older one is a
+          // historical window and stays fixed.
+          return { preset: 'custom', custom: { from: start, to: end, liveEnd: endsNow(end) } }
+        }
+      }
     }
   }
 
@@ -59,10 +71,11 @@ export function applyRangeFromUrl(): void {
 
 export function rangeQuery(preset: Preset, custom: Range | null): string {
   if (preset === 'custom' && custom) {
-    const params = new URLSearchParams({
-      from: custom.from.toISOString(),
-      to: custom.to.toISOString(),
-    })
+    const params = new URLSearchParams({ from: custom.from.toISOString() })
+    // The end of a live range is deliberately absent: it is resolved from the
+    // wall clock when the URL is read, so a reopened tab keeps following now.
+    // A fixed end is written out, since nothing else can recover it.
+    if (!custom.liveEnd) params.set('to', custom.to.toISOString())
     return `?${params}`
   }
   return `?range=${preset}`

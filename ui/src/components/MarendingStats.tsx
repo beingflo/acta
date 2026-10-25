@@ -4,10 +4,8 @@ import { fetchData } from '../lib/api'
 import { formatAge, formatCompact, formatNumber, latencyParts } from '../lib/format'
 import { type RequestOverview, requestOverviewSql } from '../lib/query'
 import { range } from '../lib/range'
+import { autoRefresh } from '../lib/refresh'
 import StatsStrip, { type Stat } from './StatsStrip'
-
-const REFRESH_MS = 30_000
-const JITTER_MS = 5_000
 
 /**
  * Scalars above the request chart: volume and rate, how much of it was
@@ -38,16 +36,8 @@ export default function MarendingStats(props: { source: string }) {
   })
 
   onMount(() => {
-    let timer = 0
-    const schedule = () => {
-      timer = window.setTimeout(async () => {
-        await load()
-        schedule()
-      }, REFRESH_MS + Math.random() * JITTER_MS)
-    }
-    schedule()
+    onCleanup(autoRefresh(load))
     onCleanup(() => {
-      clearTimeout(timer)
       requestId++ // drop replies that are still in flight
     })
   })

@@ -198,6 +198,11 @@ A fixed date range picker is always visible on the top right as a list of button
 As an example, the 30d button sets the selected time range to `[now - 30d, now]`, while `all` spans the full data range
 (earliest to newest point). The C button opens from / to datetime inputs underneath for custom ranges.
 
+A custom range whose end was within two minutes of the wall clock when it was chosen — a brush up to the right edge
+of a live chart, or the current minute in the inputs — keeps a live end: the start stays fixed and the end is resolved
+to `now` on every query, so it still ends at the present after the tab has sat in the background. Any other custom
+range is fixed.
+
 `Ctrl+H` or `←` step the window back by its own length and `Ctrl+L` or `→` step it forward: with 30d selected,
 `Ctrl+H` gives `[now - 60d, now - 30d]`. A stepped window is no longer a preset, so it becomes a custom range.
 
@@ -206,15 +211,28 @@ The frontend resolves the selection to concrete timestamps and embeds them into 
 
 The selected dashboard and range are reflected in the URL: the dashboard as a path (`/home`, `/acta`, `/eos`,
 `/marending`, `/location`) and the range as a query parameter, using a shorthand for presets (`?range=30d`) or ISO
-from/to for a custom range (`?from=2026-10-10T00:00:00.000Z&to=2026-10-11T00:00:00.000Z`). The URL is read on load
-and on back/forward; dashboard switches push a history entry while range changes replace the current one.
+from/to for a custom range (`?from=2026-10-10T00:00:00.000Z&to=2026-10-11T00:00:00.000Z`). A custom range with a live
+end writes `from` alone: the missing `to` means "resolve it to now when read", so reopening the URL keeps following
+the clock. The URL is read on load and on back/forward; dashboard switches push a history entry while range changes
+replace the current one.
 
-Relative ranges end at the wall clock, unless the data has not received a point recently, in which case they end at the
-newest available point. A stalled dataset then shows its latest window instead of an empty chart.
+Relative ranges and live-ended custom ranges always end at the wall clock. A feed that stops therefore leaves a recent
+window empty rather than silently showing the last window it had: the gap is what the dashboard should report. `all` is
+the exception in the other direction — it spans the recorded extents, which are read when the page loads and again
+whenever `all` is chosen.
 
 ## Refresh
 
-All visible charts are auto-refreshed every 30s, with random jitter to spread the requests.
+Only a live window is polled: a selection that ends at the wall clock and spans at most an hour — the 30m preset,
+or a custom range ending now. It refreshes every 10 s, with a little jitter, so the dashboard follows a live feed; a
+small mark next to the range buttons says when this is on. Any other window is a historical snapshot, fetched when it
+is selected and then left alone, so 6h, 1d, 30d and `all` do not poll. Charts, tables and the scalar strips share the
+policy. `r` reloads the data of the current view immediately, live or not, without touching the range — the live mark
+flashes to acknowledge it — and returning to a backgrounded tab reloads a live window at once instead of waiting out a
+throttled timer.
+
+No bounds polling is involved. The extents are needed only for `all`, so they are read when the page loads, whenever
+`all` is chosen, when the tab becomes visible while `all` is open, and on a manual refresh.
 
 ## Architecture
 

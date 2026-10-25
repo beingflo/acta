@@ -3,7 +3,14 @@
 import { createSignal } from 'solid-js'
 
 export type Preset = 'all' | '1y' | '30d' | '7d' | '1d' | '6h' | '30m' | 'custom'
-export type Range = { from: Date; to: Date }
+export type Range = {
+  from: Date
+  to: Date
+  /** Resolve the end to the wall clock on every query instead of keeping the
+   *  timestamp it was created with. Set when the end was within two minutes of
+   *  "now" at creation; see `setCustomRange`. */
+  liveEnd?: boolean
+}
 
 export const PRESETS: { id: Exclude<Preset, 'custom'>; label: string }[] = [
   { id: 'all', label: 'all' },
@@ -22,13 +29,26 @@ const [latest, setLatest] = createSignal<Date | null>(null)
 
 export { preset, customRange }
 
+/** How close a range end must be to the wall clock, when the range is created,
+ *  to count as "now" and keep following it. Two minutes covers a chart that
+ *  was loaded a while before it was brushed up to its right edge. */
+const LIVE_END_TOLERANCE_MS = 2 * 60 * 1000
+
 export function setPreset(next: Preset) {
   setPresetSignal(next)
 }
 
 export function setCustomRange(next: Range) {
-  setCustomRangeSignal(next)
+  // A window that ends at the clock is a live window: keep the start fixed and
+  // re-resolve the end on every query, so it still ends at "now" after the tab
+  // has sat in the background for a while.
+  setCustomRangeSignal({ ...next, liveEnd: next.liveEnd ?? endsNow(next.to) })
   setPresetSignal('custom')
+}
+
+/** True when `date` is close enough to the wall clock to be "now". */
+export function endsNow(date: Date, now = new Date()): boolean {
+  return Math.abs(now.getTime() - date.getTime()) <= LIVE_END_TOLERANCE_MS
 }
 
 /**
@@ -72,31 +92,29 @@ export function installRangeShortcuts(): () => void {
   return () => window.removeEventListener('keydown', onKey)
 }
 
-const STALE_AFTER_MS = 10 * 60 * 1000
-
-/** Oldest and newest timestamps present in the data, captured at startup. */
+/** Oldest and newest timestamps present in the data, for the `all` range. */
 export function setDataBounds(from: Date, to: Date) {
   setEarliest(from)
   setLatest(to)
 }
 
-/** Resolve the current selection to concrete timestamps. If the data has not
- *  received a point recently, end relative ranges at the newest point instead
- *  of the wall clock, so a stalled dataset shows its latest window rather than
- *  an empty one. `all` always spans the full data range. */
+/** Resolve the current selection to concrete timestamps. A live end — a preset,
+ *  or a custom range created at the wall clock — is resolved to `now` on every
+ *  call, so it never freezes at the time it was picked. Only `all` reads the
+ *  data bounds, and reading them there makes that range re-resolve when they
+ *  arrive. */
 export function range(now = new Date()): Range {
-  const newest = latest()
-  const stale = newest !== null && now.getTime() - newest.getTime() > STALE_AFTER_MS
-  const end = stale && newest ? newest : now
   const current = preset()
 
   if (current === 'custom') {
-    return customRange() ?? { from: shift(end, '1d'), to: end }
+    const custom = customRange()
+    if (!custom) return { from: shift(now, '1d'), to: now }
+    return { ...custom, to: custom.liveEnd ? now : custom.to }
   }
   if (current === 'all') {
-    return { from: earliest() ?? shift(end, '1y'), to: newest ?? end }
+    return { from: earliest() ?? shift(now, '1y'), to: latest() ?? now }
   }
-  return { from: shift(end, current), to: end }
+  return { from: shift(now, current), to: now }
 }
 
 /** True when the selected window is wide enough that a date is context enough. */

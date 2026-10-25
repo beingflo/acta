@@ -3,9 +3,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show }
 import { fetchData } from '../lib/api'
 import { formatNumber, formatTimestamp } from '../lib/format'
 import { range } from '../lib/range'
-
-const REFRESH_MS = 30_000
-const JITTER_MS = 5_000
+import { autoRefresh } from '../lib/refresh'
 
 type Sample = { at: number; data: unknown }
 
@@ -66,16 +64,8 @@ export default function SnapshotTile(props: { source: string; title: string; wid
   })
 
   onMount(() => {
-    let timer = 0
-    const schedule = () => {
-      timer = window.setTimeout(async () => {
-        await load()
-        schedule()
-      }, REFRESH_MS + Math.random() * JITTER_MS)
-    }
-    schedule()
+    onCleanup(autoRefresh(load))
     onCleanup(() => {
-      clearTimeout(timer)
       requestId++ // drop replies that are still in flight
     })
   })

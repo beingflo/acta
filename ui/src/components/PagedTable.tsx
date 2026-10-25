@@ -15,6 +15,7 @@ import { fetchData } from '../lib/api'
 import { exitFullscreen, fullscreenTile, setHoveredTile } from '../lib/fullscreen'
 import { formatNumber } from '../lib/format'
 import { range } from '../lib/range'
+import { autoRefresh } from '../lib/refresh'
 
 /** Rows per query. Pages are cached, so scrolling back costs nothing. */
 const PAGE_ROWS = 500
@@ -26,8 +27,6 @@ const DEFAULT_ROW_HEIGHT = 24
 /** How many rows we are willing to skip with `OFFSET` inside an anchor before
  *  bisecting for a closer one instead. */
 const MAX_SKIP = 1_200
-const REFRESH_MS = 30_000
-const JITTER_MS = 5_000
 
 /** A row that can serve as a page cursor. */
 export type CursoredRow = { us: number }
@@ -336,19 +335,11 @@ export default function PagedTable<T extends CursoredRow>(props: {
     })
     observer.observe(scroller)
 
-    // Refresh on the charts' cadence.
-    let timer = 0
-    const schedule = () => {
-      timer = window.setTimeout(async () => {
-        await refresh()
-        schedule()
-      }, REFRESH_MS + Math.random() * JITTER_MS)
-    }
-    schedule()
+    // Refresh on the charts' cadence, and only while the window is live.
+    onCleanup(autoRefresh(refresh))
 
     onCleanup(() => {
       observer.disconnect()
-      clearTimeout(timer)
       token++ // drop replies that are still in flight
       if (isFullscreen()) exitFullscreen()
     })

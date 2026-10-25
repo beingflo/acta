@@ -9,9 +9,8 @@ import { clearReadings, claimReadingOrder, publishReadings } from '../lib/latest
 import { BAR_FILL, fillFor, STROKE } from '../lib/palette'
 import { bucketFor, timeSeriesSql, toAligned, type Series } from '../lib/query'
 import { range, setCustomRange } from '../lib/range'
+import { autoRefresh } from '../lib/refresh'
 
-const REFRESH_MS = 30_000
-const JITTER_MS = 5_000
 const AXIS_FONT = '11px ui-sans-serif, system-ui, sans-serif'
 const DEFAULT_HEIGHT = 300
 // Bars are drawn one per bucket, so they need room: a bucket per pixel would
@@ -410,19 +409,11 @@ export default function TimeSeriesTile(props: {
     const onViewportResize = () => setViewport(window.innerHeight)
     window.addEventListener('resize', onViewportResize)
 
-    let timer = 0
-    const schedule = () => {
-      timer = window.setTimeout(async () => {
-        await load(true)
-        schedule()
-      }, REFRESH_MS + Math.random() * JITTER_MS)
-    }
-    schedule()
+    onCleanup(autoRefresh(() => load(true)))
 
     onCleanup(() => {
       observer.disconnect()
       window.removeEventListener('resize', onViewportResize)
-      clearTimeout(timer)
       clearTimeout(selectTimer)
       chart?.destroy()
       chart = undefined

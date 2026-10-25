@@ -46,6 +46,25 @@
   gap: 8px;
 }
 
+/* The live mark sits just left of the range buttons: the selection ends at the
+   clock and its tiles are polling. A dot and one word, in the chart hue, so it
+   reads without competing with the buttons. */
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: -2px;
+  font-size: 11px;
+  color: #999;
+}
+
+.live-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: hsl(150, 28%, 45%);
+}
+
 .presets {
   display: flex;
   gap: 4px;
