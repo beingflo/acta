@@ -6,6 +6,11 @@ const HUE = 150
 
 export const STROKE = `hsl(${HUE}, 28%, 40%)`
 
+/** The location track is ink, not a series: graphite, edged in white below so
+ *  it stays legible over the basemap's busy street detail. */
+export const TRACK = '#1F2937'
+export const TRACK_CASING = '#ffffff'
+
 /** Flat fill for bar charts: `fillFor` builds a gradient, which only reads well
  *  under a line. Dark enough that a run of bars reads as one solid mass, while
  *  the line charts' wash stays the lightest thing in the palette. */

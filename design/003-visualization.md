@@ -146,7 +146,8 @@ leaving time, URI, status and user agent at phone width.
 
 A single full-width and full-height tile showing a map fed by the `location_florian` data source: the position fixes
 in the selected range are plotted. They are drawn as a line joining them in time order by default; hovering the map and
-pressing `p` switches to points and back.
+pressing `p` switches to points and back. The track is graphite with a thin white casing rather than the chart green: over the
+basemap's parks and water it reads as ink with a clean edge instead of one more data line.
 
 The basemap is self-hosted. The service serves PMTiles archives from `tiles/` and the frontend renders them with
 MapLibre GL and the PMTiles protocol as several stacked sources, coarsest first: a world basemap, a mid-zoom set

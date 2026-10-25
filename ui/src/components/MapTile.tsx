@@ -6,7 +6,7 @@ import { layers, namedFlavor } from '@protomaps/basemaps'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
 import { fetchData } from '../lib/api'
-import { STROKE } from '../lib/palette'
+import { TRACK, TRACK_CASING } from '../lib/palette'
 import { locationPointsSql } from '../lib/query'
 import { range } from '../lib/range'
 
@@ -107,7 +107,9 @@ export default function MapTile() {
     const line = map.getSource('location-line') as GeoJSONSource | undefined
     points?.setData(toPoints(fixes))
     line?.setData(toLine(fixes))
-    map.setLayoutProperty('location-line-layer', 'visibility', mode() === 'line' ? 'visible' : 'none')
+    const lineVisibility = mode() === 'line' ? 'visible' : 'none'
+    map.setLayoutProperty('location-line-casing', 'visibility', lineVisibility)
+    map.setLayoutProperty('location-line-layer', 'visibility', lineVisibility)
     map.setLayoutProperty('location-points-layer', 'visibility', mode() === 'points' ? 'visible' : 'none')
   }
 
@@ -140,12 +142,21 @@ export default function MapTile() {
       if (!map) return
       map.addSource('location-points', { type: 'geojson', data: toPoints([]) })
       map.addSource('location-line', { type: 'geojson', data: toLine([]) })
+      // A white casing under the line keeps the track legible over street
+      // detail; both layers are toggled together with the line/point mode.
+      map.addLayer({
+        id: 'location-line-casing',
+        type: 'line',
+        source: 'location-line',
+        layout: { 'line-join': 'round', 'line-cap': 'round', visibility: 'visible' },
+        paint: { 'line-color': TRACK_CASING, 'line-width': 4, 'line-opacity': 0.9 },
+      })
       map.addLayer({
         id: 'location-line-layer',
         type: 'line',
         source: 'location-line',
         layout: { 'line-join': 'round', 'line-cap': 'round', visibility: 'visible' },
-        paint: { 'line-color': STROKE, 'line-width': 1.5, 'line-opacity': 0.7 },
+        paint: { 'line-color': TRACK, 'line-width': 1.5, 'line-opacity': 0.85 },
       })
       map.addLayer({
         id: 'location-points-layer',
@@ -154,8 +165,10 @@ export default function MapTile() {
         layout: { visibility: 'none' },
         paint: {
           'circle-radius': 2.5,
-          'circle-color': STROKE,
-          'circle-opacity': 0.55,
+          'circle-color': TRACK,
+          'circle-opacity': 0.7,
+          'circle-stroke-color': TRACK_CASING,
+          'circle-stroke-width': 0.8,
         },
       })
       ready = true
