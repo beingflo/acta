@@ -262,10 +262,12 @@ export type FileStats = {
 
 /**
  * The Parquet files on disk, summed from their footers. `parquet_file_metadata`
- * needs a path and the frontend does not know the data directory, but the
- * service allows exactly one read directory and DuckDB lists its temp directory
- * first, so the data directory is the last entry of `allowed_directories`. The
- * glob is the one behind the `events` view; `[!.]*` skips macOS sidecar files.
+ * needs a path and the frontend does not know the data directory, so it is read
+ * off the list of directories the service allows DuckDB to read: exactly one
+ * entry besides DuckDB's own temp directory. The temp directory is filtered out
+ * by name rather than skipped by index — its position in the list varies, it can
+ * be registered before or after the service sets its directory. The glob is the
+ * one behind the `events` view; `[!.]*` skips macOS sidecar files.
  */
 export function filesSql(): string {
   return `SELECT to_json(struct_pack(
@@ -274,7 +276,13 @@ export function filesSql(): string {
            files := count(*)
          ))::VARCHAR
 FROM parquet_file_metadata(
-  current_setting('allowed_directories')[-1] || '[!.]*.parquet'
+  list_filter(
+    current_setting('allowed_directories'),
+    lambda d: NOT ends_with(
+      rtrim(d, '/'),
+      '/' || regexp_extract(rtrim(current_setting('temp_directory'), '/'), '[^/]+$')
+    )
+  )[1] || '[!.]*.parquet'
 )`
 }
 
