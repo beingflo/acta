@@ -771,6 +771,12 @@ body.fullscreen-tile {
   font-size: 10px;
   color: #a8a8a8;
   font-variant-numeric: tabular-nums;
+  /* A year of rows scrolls past the hour marks in a maximized lane, so they stay
+     at the top instead of leaving the columns unreadable. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
 }
 
 /* One mark per hour, each taking the width of that hour's two half-hour cells:
@@ -830,20 +836,20 @@ body.fullscreen-tile {
   color: #c6c2bb;
 }
 
-/* A maximized lane spreads its rows over the viewport instead of stacking them
-   at the top. */
+/* A maximized lane takes the viewport's width and height, and scrolls through
+   its rows at their own height. Stretching them to fit instead — the first
+   attempt — divides one viewport between a year of days, which leaves every row
+   a hairline and the tile apparently empty. */
+.tile.lane.fullscreen {
+  display: flex;
+  flex-direction: column;
+}
+
 .tile.lane.fullscreen .lane {
-  height: 100%;
-  padding-bottom: 10px;
-}
-
-.tile.lane.fullscreen .lane-row {
   flex: 1;
-  height: auto;
-}
-
-.tile.lane.fullscreen .lane-cell {
-  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 10px;
 }
 
 /* Command palette: a hush over the page, and a panel that is mostly whitespace.
