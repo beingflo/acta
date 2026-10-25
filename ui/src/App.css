@@ -672,48 +672,174 @@ body.fullscreen-tile {
   inset: 0;
 }
 
+/* Command palette: a hush over the page, and a panel that is mostly whitespace.
+   No header rule and no full-width highlight band — the row under the pointer is
+   a soft pill, and the only chrome is a hairline around the panel itself. */
 .palette-backdrop {
   position: fixed;
   inset: 0;
   z-index: 100;
   display: flex;
   justify-content: center;
-  padding-top: 18vh;
-  background: rgba(0, 0, 0, 0.18);
+  align-items: flex-start;
+  padding: 14vh 12px 12px;
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: palette-hush 120ms ease-out;
 }
 
 .palette {
   display: flex;
   flex-direction: column;
-  width: min(420px, 90vw);
-  height: fit-content;
+  width: min(440px, 100%);
+  max-height: min(420px, 70vh);
   overflow: hidden;
   background: #fff;
-  border: 1px solid #eeeeee;
-  border-radius: 10px;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.12);
+  border: 1px solid #e8e8e8;
+  border-radius: 12px;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.03), 0 18px 44px rgba(0, 0, 0, 0.1);
+  animation: palette-rise 140ms ease-out;
 }
 
-.palette input {
-  padding: 12px 14px;
-  font-size: 14px;
+@keyframes palette-hush {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes palette-rise {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.99);
+  }
+}
+
+.palette-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 15px 16px 10px;
+}
+
+.palette-search input {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  color: #111;
+  background: none;
   border: 0;
-  border-bottom: 1px solid #f0f0f0;
   outline: none;
 }
 
-.palette button {
-  padding: 10px 14px;
-  font-size: 14px;
-  color: #333;
+.palette-search input::placeholder {
+  color: #a8a8a8;
+}
+
+.palette-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  padding: 0 8px 8px;
+  overflow-y: auto;
+}
+
+.palette-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #3a3a3a;
   text-align: left;
+  border-radius: 7px;
 }
 
-.palette button.current {
-  font-weight: 600;
-}
-
-.palette button.highlighted {
-  background: #e4e4e4;
+.palette-list button.highlighted {
   color: #000;
+  background: #f1f1f1;
+}
+
+/* The dashboard already on screen: a quiet label rather than bold text, so the
+   highlighted row stays the loudest thing in the list. */
+.palette-tag {
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #b4b4b4;
+}
+
+.palette-empty {
+  margin: 0;
+  padding: 10px;
+  font-size: 12px;
+  color: #a0a0a0;
+}
+
+.palette-hints {
+  display: flex;
+  gap: 14px;
+  padding: 9px 16px 11px;
+  font-size: 10px;
+  color: #a8a8a8;
+  border-top: 1px solid #f4f4f4;
+}
+
+.palette-hints span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.palette kbd {
+  padding: 1px 4px;
+  font: inherit;
+  font-size: 10px;
+  color: #8f8f8f;
+  background: #fafafa;
+  border: 1px solid #ececec;
+  border-radius: 4px;
+}
+
+/* A keyboard hint is noise on a phone, and the panel should not fill the screen. */
+@media (max-width: 720px) {
+  .palette-backdrop {
+    padding: 8vh 10px 10px;
+  }
+
+  .palette {
+    max-height: 80vh;
+  }
+
+  .palette-search kbd,
+  .palette-hints {
+    display: none;
+  }
+}
+
+/* Safari on iOS — and Firefox, on iOS as well as Android — zoom the page when a
+   field under 16px takes focus, and the palette focuses its search field as it
+   opens. 16px is the threshold, so every field on a touch or narrow viewport is
+   set to it: the palette's search, and the range picker's date fields. */
+@media (max-width: 720px), (hover: none) and (pointer: coarse) {
+  .palette-search input,
+  .custom-range input {
+    font-size: 16px;
+  }
+}
+
+/* Two date fields and an arrow do not fit across a phone at a legible size, so
+   they stack, and the popover stays inside the viewport. */
+@media (max-width: 720px) {
+  .custom-range {
+    flex-direction: column;
+    align-items: stretch;
+    width: min(320px, calc(100vw - 28px));
+  }
+
+  .custom-range > span {
+    display: none;
+  }
 }

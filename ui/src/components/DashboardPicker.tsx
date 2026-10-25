@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, onCleanup, onMount } from 'solid-js'
+import { createEffect, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
 
 import { DASHBOARDS } from '../dashboards'
 
@@ -7,6 +7,7 @@ export default function DashboardPicker(props: { active: string; onSelect: (id: 
   const [query, setQuery] = createSignal('')
   const [highlight, setHighlight] = createSignal(0)
   let searchRef: HTMLInputElement | undefined
+  let listRef: HTMLDivElement | undefined
 
   const filtered = () =>
     DASHBOARDS.filter((dashboard) => dashboard.title.toLowerCase().includes(query().toLowerCase()))
@@ -29,6 +30,13 @@ export default function DashboardPicker(props: { active: string; onSelect: (id: 
   // reliable for elements inserted after page load.
   createEffect(() => {
     if (open()) searchRef?.focus()
+  })
+
+  // Keep the highlighted row in view, for a list longer than the panel.
+  createEffect(() => {
+    const index = highlight()
+    if (!open()) return
+    listRef?.querySelectorAll('button')[index]?.scrollIntoView({ block: 'nearest' })
   })
 
   onMount(() => {
@@ -78,31 +86,57 @@ export default function DashboardPicker(props: { active: string; onSelect: (id: 
       </button>
       {open() && (
         <div class="palette-backdrop" onClick={() => setOpen(false)}>
-          <div class="palette" onClick={(event) => event.stopPropagation()}>
-            <input
-              ref={searchRef}
-              placeholder="Go to dashboard…"
-              value={query()}
-              onInput={(event) => {
-                setQuery(event.currentTarget.value)
-                // Typing narrows the list; put the highlight on the first match.
-                setHighlight(0)
-              }}
-            />
-            <For each={filtered()}>
-              {(dashboard, index) => (
-                <button
-                  classList={{
-                    highlighted: index() === highlight(),
-                    current: dashboard.id === props.active,
-                  }}
-                  onMouseEnter={() => setHighlight(index())}
-                  onClick={() => select(dashboard.id)}
-                >
-                  {dashboard.title}
-                </button>
-              )}
-            </For>
+          <div
+            class="palette"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Go to dashboard"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div class="palette-search">
+              <input
+                ref={searchRef}
+                placeholder="Go to dashboard…"
+                value={query()}
+                onInput={(event) => {
+                  setQuery(event.currentTarget.value)
+                  // Typing narrows the list; put the highlight on the first match.
+                  setHighlight(0)
+                }}
+              />
+              <kbd>esc</kbd>
+            </div>
+            <div class="palette-list" ref={listRef}>
+              <For each={filtered()}>
+                {(dashboard, index) => (
+                  <button
+                    classList={{
+                      highlighted: index() === highlight(),
+                      current: dashboard.id === props.active,
+                    }}
+                    onMouseEnter={() => setHighlight(index())}
+                    onClick={() => select(dashboard.id)}
+                  >
+                    {dashboard.title}
+                    <Show when={dashboard.id === props.active}>
+                      <span class="palette-tag">current</span>
+                    </Show>
+                  </button>
+                )}
+              </For>
+              <Show when={filtered().length === 0}>
+                <p class="palette-empty">Nothing matches “{query()}”.</p>
+              </Show>
+            </div>
+            <div class="palette-hints">
+              <span>
+                <kbd>↑</kbd>
+                <kbd>↓</kbd> move
+              </span>
+              <span>
+                <kbd>↵</kbd> open
+              </span>
+            </div>
           </div>
         </div>
       )}

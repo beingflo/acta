@@ -15,6 +15,10 @@ html,
 body,
 #root {
   height: 100%;
+  /* Firefox for Android inflates text on pages it decides are not mobile-ready;
+     the layout here is the app's business, so ask for the sizes the CSS states. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
