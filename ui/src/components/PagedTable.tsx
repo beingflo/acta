@@ -13,6 +13,7 @@ import {
 
 import { fetchData } from '../lib/api'
 import { exitFullscreen, fullscreenTile, setHoveredTile } from '../lib/fullscreen'
+import ExpandButton from './ExpandButton'
 import { formatNumber } from '../lib/format'
 import { range } from '../lib/range'
 import { autoRefresh } from '../lib/refresh'
@@ -361,6 +362,9 @@ export default function PagedTable<T extends CursoredRow>(props: {
           <span class="tile-count"> · loading</span>
         </Show>
       </header>
+      <Show when={!isFullscreen()}>
+        <ExpandButton tile={id} />
+      </Show>
       <Show when={isFullscreen()}>
         <button class="tile-close" onClick={exitFullscreen} aria-label="Exit fullscreen">
           ×

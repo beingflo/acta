@@ -4,6 +4,7 @@ import 'uplot/dist/uPlot.min.css'
 
 import { fetchData } from '../lib/api'
 import { exitFullscreen, fullscreenTile, setHoveredTile } from '../lib/fullscreen'
+import ExpandButton from './ExpandButton'
 import { axisTickLabels, formatBucket, formatNumber, formatTimestamp, unitOf } from '../lib/format'
 import { clearReadings, claimReadingOrder, publishReadings } from '../lib/latest'
 import { BAR_FILL, fillFor, STROKE } from '../lib/palette'
@@ -17,10 +18,11 @@ const DEFAULT_HEIGHT = 300
 // uPlot reserves a flat 50px for every axis, whatever its labels need; these
 // three numbers turn that into the room the labels actually take: the tick
 // marks, the gap between a tick and its label, and one line of 11px text. A
-// short chart spends a fifth of its height on that flat reservation.
+// line is `font-size × lineGap` (uPlot's lineGap is 1.5), not the font size —
+// two rows of a rollover label need 33px, and reserving less clips the date.
 const AXIS_TICK = 10
 const AXIS_GAP = 5
-const AXIS_LINE = 13
+const AXIS_LINE = 17
 
 /** Width of a piece of text in the axis font, for sizing the y axis. */
 const measure = (() => {
@@ -42,6 +44,25 @@ const tickRoom = (rows: number) => AXIS_TICK + AXIS_GAP + rows * AXIS_LINE
 /** Rows a set of labels needs: a tick that starts a day or a year gets two. */
 const rowsOf = (values: (string | null)[] | null) =>
   values?.reduce((rows, value) => Math.max(rows, String(value ?? '').split('\n').length), 1) ?? 1
+
+/** uPlot's own bookkeeping for an axis: the labels it last drew, and its size. */
+const bookkeeping = (self: uPlot, index: number) =>
+  self.axes[index] as unknown as { _values?: (string | null)[]; _size?: number }
+
+/**
+ * How far half of a tick label hangs past the edge of the plot. The first and
+ * last ticks sit on the plot's corners, so a label wider than the axis that
+ * offsets it is cut by the canvas — which is what clipped "6pm" to "6pr" on a
+ * phone, where the plot ends at the window's right edge.
+ */
+const overhang = (values: (string | null)[] | null | undefined, index: number) => {
+  const value = index === -1 ? values?.[(values?.length ?? 0) - 1] : values?.[index]
+  if (!value) return 0
+  const widest = Math.max(...String(value).split('\n').map(measure))
+  // A couple of pixels of slack: uPlot draws the label centred on the canvas
+  // pixel it rounds the tick to, so an exact half hangs over by a hair.
+  return Math.ceil(widest / 2) + 3
+}
 // Bars are drawn one per bucket, so they need room: a bucket per pixel would
 // render as a solid block with no gaps between the bars.
 const BAR_BUCKET_PX = 10
@@ -254,8 +275,15 @@ export default function TimeSeriesTile(props: {
     // axis width (25px each) so an axis label cannot be clipped, even when
     // there is no top or right axis. Both are too generous here: the top needs
     // half a line of text so a tick at the very top of a fixed scale is whole,
-    // and the right needs room for the last marker or half a bar.
-    padding: [8, 6, 0, 0],
+    // and the edges need exactly as much as the corner labels hang over — no
+    // more, and not a pixel less.
+    padding: [
+      8,
+      (self) => Math.max(8, overhang(bookkeeping(self, 0)._values, -1)),
+      0,
+      (self) =>
+        Math.max(0, overhang(bookkeeping(self, 0)._values, 0) - (bookkeeping(self, 1)._size ?? 0)),
+    ],
     series: [
       {},
       ...props.series.map((s, index) =>
@@ -509,6 +537,9 @@ export default function TimeSeriesTile(props: {
           <span class="tile-note"> · per {formatBucket(barMs()!)}</span>
         </Show>
       </header>
+      <Show when={!isFullscreen()}>
+        <ExpandButton tile={id} />
+      </Show>
       <Show when={isFullscreen()}>
         <button class="tile-close" onClick={exitFullscreen} aria-label="Exit fullscreen">
           ×

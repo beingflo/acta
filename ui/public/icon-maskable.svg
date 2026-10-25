@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- The same mark, edge to edge: a launcher crops a maskable icon to its own
+       shape, so the plate has to reach every corner and the drawing stays inside
+       the middle 80%. -->
+  <rect width="512" height="512" fill="#000000" />
+  <path d="M104 356h304" fill="none" stroke="#ffffff" stroke-width="18" stroke-linecap="round" />
+  <path
+    d="M120 300l60-36 52 44 60-92 52 32 56-60"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="24"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>
