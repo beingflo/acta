@@ -64,6 +64,11 @@ export async function signIn(user: string, password: string): Promise<void> {
     await loadScope()
     return
   }
+  if (response.status === 429) {
+    // The service paces failed sign-ins; it says for how long.
+    const seconds = Number(response.headers.get('Retry-After') ?? '60')
+    throw new Error(`Too many attempts. Try again in ${seconds}s.`)
+  }
   throw new Error(
     response.status === 401 ? 'That user and password do not match.' : response.statusText,
   )

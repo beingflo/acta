@@ -47,7 +47,26 @@ either one invalidates every outstanding cookie** — including the restricted v
 that is the revocation story, and the reason a sign-out only clears the browser's copy. Refusals carry no `WWW-Authenticate`: the app owns the sign-in, and a challenge
 on a `fetch` makes browsers raise their own dialog instead — which strands clients that cannot answer a modal.
 
-Basic auth is still accepted on every path, so `curl`, the hurl scenarios and the deploy scripts are unaffected.
+**Basic credentials are read in two places only**: `/api/session`, where the dashboard trades them for the cookie, and
+the sensor's write routes (`/api/ingest`, `/api/gps/{source}`), which a machine presents on every request. Every other
+route wants the cookie — a basic header on `/api/data`, `/api/series`, `/api/me` or `/tiles/*` is simply ignored and
+answered `401`. That narrows the surface a password can be guessed against to a single endpoint, which is what makes the
+throttle below worth having. Locally, with authentication off, nothing changes: there is nothing to present.
+
+**Failed sign-ins are paced, without any per-address state.** Ten failures inside a minute and the eleventh answers `429`
+with `Retry-After`; a success clears the budget, and a correct credential is verified *before* the budget is consulted, so
+a flood of wrong guesses can never lock the owner out of signing in — it only exhausts its own kind. One counter serves
+everybody, which is the right size for a household, and it means no client addresses are read, stored, or trusted. Each
+failure logs one line with the forwarded address (never the credential), so `fail2ban` or a Caddy rule has something to
+match if the host ever grows one; the sensor credential is not throttled, since it is machine-issued and throttling it
+would let an outsider stall the collectors.
+
+Scripts that used to send `curl -u … /api/data` sign in first and keep the cookie:
+
+```sh
+curl -s -o /dev/null -c jar -u "$user:$password" https://host/api/session
+curl -s -b jar -X POST -H 'Content-Type: application/json' -d '{"sql":"select 1"}' https://host/api/data
+```
 
 ### The restricted viewer
 
