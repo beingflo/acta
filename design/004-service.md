@@ -239,7 +239,11 @@ State lives in two places, neither of which a deploy touches:
 
 The unit also joins the shared `acta-net` network declared by `acta-net.network`, with the alias `acta`, so
 marending.dev's exporter can reach it at `http://acta:8080` without leaving the host. Caddy keeps using the
-loopback-published `127.0.0.1:8080`, and the network unit is installed by the same deploy.
+loopback-published `127.0.0.1:8080`, and the network unit is installed by the same deploy. The network names its DNS
+upstream (`DNS=`): podman points every container on it at aardvark-dns, which answers container names itself but
+forwards everything else to the rootless namespace's copy of the host resolver. On a systemd-resolved host that is
+the unreachable `127.0.0.53` stub, so every external lookup inside the network hangs — which is how the S3 backup
+first failed.
 
 **The container runs unprivileged and can gain nothing.** The image declares `USER 1000:1000` and the unit adds
 `UserNS=keep-id:uid=1000,gid=1000`, so container uid 1000 *is* the deploying host user: on disk nothing changes owner,

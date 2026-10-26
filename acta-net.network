@@ -3,3 +3,10 @@ Description=Shared Podman network for acta and marending.dev
 
 [Network]
 NetworkName=acta-net
+# The network's resolver is aardvark-dns, which forwards external names to the
+# upstreams it inherits from the rootless network namespace. On this host that
+# file holds systemd-resolved's 127.0.0.53 stub, which the namespace cannot
+# reach, so nothing outside the network resolved and acta's backup timed out on
+# every attempt. Pin the router explicitly, IPv4 only: a hanging IPv6 upstream
+# would fail the same way.
+DNS=192.168.178.1

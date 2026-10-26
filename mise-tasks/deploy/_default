@@ -113,7 +113,9 @@ sed "${sed_args[@]}" acta.container \
 
 # The shared network is declared here and pulled in by acta.container's
 # `Network=acta-net.network`; marending's deploy only checks that this file is
-# present. Quadlet creates the network from the unit on daemon-reload.
+# present. Quadlet creates the network from the unit on daemon-reload — but only
+# when it does not exist yet, so changing an option there (DNS=, subnet) takes
+# one manual `podman network rm acta-net` with the network's containers stopped.
 note "installing acta-net.network"
 ssh "$host" 'mkdir -p "$HOME/.config/containers/systemd" && cat > "$HOME/.config/containers/systemd/acta-net.network"' < acta-net.network
 
