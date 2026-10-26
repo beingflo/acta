@@ -230,9 +230,7 @@ between two fixes is the last one seen, held until the next, and a share of samp
 office "mostly absent". Bucketing would do a second kind of damage: the fixes of a walk-in start outside and end
 inside, so a bucket that holds a whole walk has to pick one of the two and gets half of it wrong, and any bucket width
 moves an arrival or a departure by up to that width. One point per fix is exact, and small enough to send whole: a year
-is a few thousand rows. `trip` summaries carry no position and are filtered out, so they can never read as "away". The
-weekends are shaded behind it in the same warm grey the lane tints its weekend rows with, so the flat stretch across a
-Saturday reads as a day off rather than as data that stopped arriving.
+is a few thousand rows. `trip` summaries carry no position and are filtered out, so they can never read as "away".
 
 ### TODO add more later
 

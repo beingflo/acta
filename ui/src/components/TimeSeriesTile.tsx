@@ -38,26 +38,6 @@ const measure = (() => {
   }
 })()
 
-/** Fill the shaded ranges over the plot area, clipped to it. */
-const shadePlot = (self: uPlot, ranges: Array<[number, number]>) => {
-  const { ctx, bbox } = self
-  const [left, right] = [bbox.left, bbox.left + bbox.width]
-  // `valToPos` measures from the canvas origin, not from the plot area, so the
-  // axis width has to be added back — without it every band sits left of where
-  // it belongs, by exactly the width of the y axis.
-  const xAt = (value: number) => self.valToPos(value, 'x', false) + bbox.left
-
-  ctx.save()
-  // The same warm grey the day lane tints its weekend rows with.
-  ctx.fillStyle = 'rgba(120, 110, 95, 0.07)'
-  for (const [from, to] of ranges) {
-    const a = Math.max(left, Math.round(xAt(from)))
-    const b = Math.min(right, Math.round(xAt(to)))
-    if (b > a) ctx.fillRect(a, bbox.top, b - a, bbox.height)
-  }
-  ctx.restore()
-}
-
 /** Room for `rows` lines of tick label, plus the ticks themselves. */
 const tickRoom = (rows: number) => AXIS_TICK + AXIS_GAP + rows * AXIS_LINE
 
@@ -166,12 +146,6 @@ export default function TimeSeriesTile(props: {
    * only names the columns, its `expr` unused.
    */
   query?: (from: Date, to: Date) => string
-  /**
-   * Ranges to shade behind the plot, as epoch seconds — weekends, so a flat line
-   * across one reads as a day off rather than as missing data. Asked for on every
-   * draw, so it follows the selected range without rebuilding the chart.
-   */
-  shade?: () => Array<[number, number]>
 }) {
   // A metric tile has exactly one series; a SQL tile has as many as it was
   // given. Everything below reads `series()` rather than the prop.
@@ -457,13 +431,6 @@ export default function TimeSeriesTile(props: {
       },
     },
     hooks: {
-      ...(props.shade
-        ? {
-            // `drawClear` rather than `draw`: the bands belong under the series,
-            // and it runs after the canvas is wiped but before anything is drawn.
-            drawClear: [(self: uPlot) => shadePlot(self, props.shade!())],
-          }
-        : {}),
       setCursor: [(self) => updateTooltip(self)],
       setSelect: [(self) => settleSelection(self)],
     },

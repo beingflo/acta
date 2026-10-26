@@ -1,8 +1,7 @@
 import OfficeLane from '../components/OfficeLane'
 import TimeSeriesTile from '../components/TimeSeriesTile'
 import WorkStats from '../components/WorkStats'
-import { officeFixesSql, weekendRanges } from '../lib/query'
-import { range } from '../lib/range'
+import { officeFixesSql } from '../lib/query'
 
 /**
  * The office day: when it started and when it resumed after lunch, presence over
@@ -24,10 +23,6 @@ export default function Work() {
         title="At the office"
         series={[{ label: 'At office', expr: '' }]}
         query={officeFixesSql}
-        shade={() => {
-          const { from, to } = range()
-          return weekendRanges(from, to)
-        }}
         // The line sits at 0 or 1; padding the scale keeps it off the axes.
         yRange={[-0.2, 1.2]}
         yTickEnds

@@ -617,28 +617,6 @@ export function rangeDay(to: Date): Date {
 }
 
 /**
- * The weekends inside a window, as epoch-second pairs, for shading a chart.
- *
- * A band runs from one Saturday's midnight to the following Monday's, so a
- * window that starts on a Sunday gets a band already in progress — the chart
- * clamps it to the plot. Local days again: what counts as a weekend is the
- * calendar's business, not SQL's.
- */
-export function weekendRanges(from: Date, to: Date): Array<[number, number]> {
-  const ranges: Array<[number, number]> = []
-  const first = new Date(from.getFullYear(), from.getMonth(), from.getDate())
-  for (let at = first; at < to; ) {
-    // Only Saturdays open a band; the Sunday that follows is inside it.
-    if (at.getDay() === 6) {
-      const monday = new Date(at.getFullYear(), at.getMonth(), at.getDate() + 2)
-      ranges.push([at.getTime() / 1000, monday.getTime() / 1000])
-    }
-    at = new Date(at.getFullYear(), at.getMonth(), at.getDate() + 1)
-  }
-  return ranges
-}
-
-/**
  * The local days a window is *about*, as the two instants bracketing each one:
  * the day it ends in and as many before it as the window is long, oldest first.
  *
