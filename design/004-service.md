@@ -237,6 +237,10 @@ State lives in two places, neither of which a deploy touches:
 - `~/acta/tiles` — the PMTiles archives, mounted read-only. Regenerated on the host and copied with
   `mise run deploy:tiles`; the container never writes there.
 
+The unit also joins the shared `acta-net` network declared by `acta-net.network`, with the alias `acta`, so
+marending.dev's exporter can reach it at `http://acta:8080` without leaving the host. Caddy keeps using the
+loopback-published `127.0.0.1:8080`, and the network unit is installed by the same deploy.
+
 **The container runs unprivileged and can gain nothing.** The image declares `USER 1000:1000` and the unit adds
 `UserNS=keep-id:uid=1000,gid=1000`, so container uid 1000 *is* the deploying host user: on disk nothing changes owner,
 the data volume needs no chown, and no process inside is ever uid 0. `keep-id` is what makes that true — without it,

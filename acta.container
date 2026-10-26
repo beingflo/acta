@@ -6,6 +6,11 @@ After=network-online.target
 [Container]
 Image=localhost/acta:__TAG__
 PublishPort=127.0.0.1:8080:8080
+# Shared with marending.dev, whose exporter talks to the `acta` alias. The
+# network unit is installed by `mise run deploy`; Caddy still reaches Acta on
+# the loopback-published port above.
+Network=acta-net.network
+NetworkAlias=acta
 
 # Data lives in a named volume; tiles are read-only and regenerated on the
 # host. Non-secret configuration is rendered into the Environment= lines below

@@ -111,6 +111,12 @@ sed "${sed_args[@]}" acta.container \
   | CONFIG="$config" awk '{ if ($0 == "__CONFIG__") print ENVIRON["CONFIG"]; else print }' \
   | ssh "$host" 'mkdir -p "$HOME/.config/containers/systemd" && cat > "$HOME/.config/containers/systemd/acta.container"'
 
+# The shared network is declared here and pulled in by acta.container's
+# `Network=acta-net.network`; marending's deploy only checks that this file is
+# present. Quadlet creates the network from the unit on daemon-reload.
+note "installing acta-net.network"
+ssh "$host" 'mkdir -p "$HOME/.config/containers/systemd" && cat > "$HOME/.config/containers/systemd/acta-net.network"' < acta-net.network
+
 # Drop the env file written by older deploys; it is no longer referenced.
 ssh "$host" 'rm -f "$HOME/.config/acta/acta.env"; rmdir "$HOME/.config/acta" 2>/dev/null || true'
 

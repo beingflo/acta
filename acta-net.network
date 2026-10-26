@@ -1,0 +1,5 @@
+[Unit]
+Description=Shared Podman network for acta and marending.dev
+
+[Network]
+NetworkName=acta-net
