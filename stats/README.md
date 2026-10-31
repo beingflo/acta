@@ -28,7 +28,7 @@ All paths are relative to the row's `data` object:
 | `memory.total_mb`, `used_mb`, `used_pct` | RAM |
 | `disk.used_gb`, `disk.used_pct` | used space and share of the filesystem behind `/` (btrfs subvolumes count as one) |
 | `disk.boot_pct` | `/boot`'s share, when it is its own filesystem |
-| `disk_io.<disk>.read_kbps`, `write_kbps` | throughput over the interval, whole disks in use only |
+| `disk_io.<disk>.read_kbps`, `write_kbps` | throughput over the interval, for the disks behind a mounted filesystem |
 | `disk_io.<disk>.busy_pct`, `await_ms` | share of the interval an I/O was in flight, and the average latency per operation |
 | `network.rx_kbps`, `tx_kbps` | rates over the interval, all interfaces but `lo` |
 | `battery.charge_pct`, `temp_c`, `power_w`, `status` | `macsmc-battery` |
@@ -43,11 +43,13 @@ task stalled, `full` the share where nothing made progress at all. Only `avg10` 
 moving averages of the same series — and `cpu` has no `full` line, since a stalled CPU task is a stalled CPU. A
 kernel built without PSI reports `null`.
 
-`disk_io` covers whole disks that carry something, not partitions (their I/O is the disk's, counted twice), not the
-per-boot pseudo-devices, and not a namespace with no capacity or one nothing has ever read from or written to — Apple's
-firmware declares two of those beside the SSD, and they are flat lines forever. `busy_pct` and `await_ms` answer
-different questions and neither follows from the other: a saturated disk is busy with a short await, a sick one is
-idle with a long one. Like every other rate, `disk_io` starts on the second sample.
+`disk_io` covers only the whole disks a filesystem is mounted from — not partitions (their I/O is the disk's, counted
+twice), not the per-boot pseudo-devices, and not a disk that holds nothing: Apple's controller offers two namespaces
+beside the SSD that count a little I/O from the boot probe and never move a byte afterwards, and no counter of theirs
+ever says so, so the mounted set is what decides. A partition, a mapper device and a raid array each resolve to the
+disk underneath. `busy_pct` and `await_ms` answer different questions and neither follows from the other: a saturated
+disk is busy with a short await, a sick one is idle with a long one. Like every other rate, `disk_io` starts on the
+second sample.
 
 `nvme.temp_c` is normally already inside `temp.board_c` too, since the kernel registers the drive's sensor as an
 ordinary hwmon device; it is repeated with `crit_c` so the chart has the limit it is heading for. The counters a

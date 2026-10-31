@@ -29,6 +29,7 @@ import argparse
 import base64
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -41,10 +42,6 @@ from pathlib import Path
 # Filesystems worth reporting: real ones. tmpfs, overlay and friends change per
 # boot and say nothing about the disk filling up.
 FILESYSTEMS = {"btrfs", "ext4", "xfs", "vfat", "f2fs"}
-
-# Block device names worth a rate: the whole disks a laptop can have, never the
-# partitions and never the per-boot pseudo devices.
-DISK_PREFIXES = ("nvme", "sd", "mmcblk", "vd", "hd")
 
 # How often the half of the sample that is not a free gauge is worth its cost.
 # The host gauges — including the counters every rate is a difference of — are
@@ -179,6 +176,71 @@ def memory() -> dict:
     }
 
 
+def mounts() -> list[tuple[str, str]]:
+    """Device and mount point of every mount of a real filesystem."""
+    found = []
+    for line in (slurp("/proc/self/mounts") or "").splitlines():
+        fields = line.split()
+        if len(fields) >= 3 and fields[2] in FILESYSTEMS:
+            found.append((fields[0], fields[1].replace("\\040", " ")))  # spaces are escaped
+    return found
+
+
+def block_name(device: str) -> str | None:
+    """The kernel's name for a mount's device node: `/dev/mapper/x` -> `dm-0`.
+
+    The path a mount records is a name a person chose — a mapper alias, a
+    partition, a plain disk — while sysfs indexes block devices by number, so the
+    node itself is the only reliable way in.
+    """
+    try:
+        info = os.stat(device)
+    except OSError:
+        return None
+    if not stat.S_ISBLK(info.st_mode):
+        return None
+    node = Path("/sys/dev/block", f"{os.major(info.st_rdev)}:{os.minor(info.st_rdev)}")
+    return node.resolve().name if node.exists() else None
+
+
+def whole_disks(name: str, depth: int = 0) -> set[str]:
+    """The whole disk(s) behind a block device: a disk, a partition, a mapper.
+
+    A partition's sysfs entry sits inside its disk's directory, and a mapper or
+    raid device lists what it is made of in `slaves`, so either resolves in a
+    step or two; the depth limit is only a guard against a cycle.
+    """
+    if not name or depth > 4:
+        return set()
+    if Path("/sys/block", name).exists():
+        return {name}
+    slaves = Path("/sys/class/block", name, "slaves")
+    if slaves.is_dir():
+        found: set[str] = set()
+        for slave in slaves.iterdir():
+            found |= whole_disks(slave.name, depth + 1)
+        return found
+    entry = Path("/sys/class/block", name)
+    if not entry.exists():
+        return set()
+    return whole_disks(entry.resolve().parent.name, depth + 1)
+
+
+def mounted_disks() -> set[str]:
+    """The whole disks that carry a mounted filesystem.
+
+    This is the one signal that separates the drives that matter from the ones
+    the firmware merely declares: Apple's controller offers two namespaces beside
+    the SSD that count some I/O from the boot probe and never move a byte
+    afterwards, and no counter of theirs ever says so. A partition, a mapper
+    device and a raid array all resolve to the disk that does the I/O.
+    """
+    found: set[str] = set()
+    for device, _ in mounts():
+        found |= whole_disks(block_name(device) or "")
+    return found
+
+
 def disks() -> dict:
     """Space on the filesystem behind `/`, plus `/boot`'s share.
 
@@ -192,15 +254,11 @@ def disks() -> dict:
     nothing about the disk filling up.
     """
     # One mount point per device; the shortest is the filesystem's name.
-    mounts: dict[str, str] = {}
-    for line in (slurp("/proc/self/mounts") or "").splitlines():
-        fields = line.split()
-        if len(fields) < 3 or fields[2] not in FILESYSTEMS:
-            continue
-        mount = fields[1].replace("\\040", " ")  # spaces are escaped in mounts
-        known = mounts.get(fields[0])
+    devices: dict[str, str] = {}
+    for device, mount in mounts():
+        known = devices.get(device)
         if known is None or len(mount) < len(known):
-            mounts[fields[0]] = mount
+            devices[device] = mount
 
     def usage(mount: str) -> dict | None:
         try:
@@ -218,7 +276,7 @@ def disks() -> dict:
     root = usage("/")
     # /boot is only its own filesystem when it is a separate mount; otherwise it
     # is a directory on `/` and its numbers would just repeat root's.
-    boot = usage("/boot") if "/boot" in mounts.values() else None
+    boot = usage("/boot") if "/boot" in devices.values() else None
     return {
         "used_gb": root["used_gb"] if root else None,
         "used_pct": root["used_pct"] if root else None,
@@ -227,33 +285,28 @@ def disks() -> dict:
 
 
 def disk_counters() -> dict[str, tuple[int, ...]]:
-    """Per whole disk that carries something, the counters every rate needs.
+    """Per disk that carries a mounted filesystem, the counters every rate needs.
 
-    Partitions are skipped — their I/O is the disk's, counted twice — and so are
-    the devices the kernel synthesises per boot (loop, ram, zram, the optical
-    drive). So is a disk with no capacity, and one that has not completed a
-    single I/O since boot: Apple's firmware declares two such namespaces beside
-    the SSD, and they would be two flat lines forever.
+    Partitions are skipped — their I/O is the disk's, counted twice — and so is
+    every device no filesystem is mounted from: the pseudo devices the kernel
+    declares per boot (loop, ram, zram, the optical drive) and the two namespaces
+    Apple's controller lists beside the SSD. Those count a little I/O from the
+    boot probe and then nothing ever again, which is exactly the kind of disk
+    that would sit in the payload as three zeros forever.
 
     /proc/diskstats counts sectors of 512 bytes whatever the drive's own sector
     size, and io_ticks as milliseconds with at least one I/O in flight.
     """
+    wanted = mounted_disks()
     counters: dict[str, tuple[int, ...]] = {}
     for line in (slurp("/proc/diskstats") or "").splitlines():
         fields = line.split()
-        if len(fields) < 14:
-            continue
-        name = fields[2]
-        # A partition has no /sys/block entry of its own; the whole disk does.
-        if not name.startswith(DISK_PREFIXES) or not Path("/sys/block", name).exists():
+        if len(fields) < 14 or fields[2] not in wanted:
             continue
         reads, sectors_read, writes, sectors_written, io_ms = (
             int(fields[field]) for field in (3, 5, 7, 9, 12)
         )
-        capacity = (slurp(f"/sys/block/{name}/size") or "").strip()
-        if reads + writes == 0 or capacity == "0":
-            continue
-        counters[name] = (reads, sectors_read, writes, sectors_written, io_ms)
+        counters[fields[2]] = (reads, sectors_read, writes, sectors_written, io_ms)
     return counters
 
 
