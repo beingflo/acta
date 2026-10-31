@@ -227,12 +227,16 @@ def disks() -> dict:
 
 
 def disk_counters() -> dict[str, tuple[int, ...]]:
-    """Per whole disk, the counters every disk rate is a difference of.
+    """Per whole disk that carries something, the counters every rate needs.
 
     Partitions are skipped — their I/O is the disk's, counted twice — and so are
     the devices the kernel synthesises per boot (loop, ram, zram, the optical
-    drive). /proc/diskstats counts sectors of 512 bytes whatever the drive's own
-    sector size, and io_ticks as milliseconds with at least one I/O in flight.
+    drive). So is a disk with no capacity, and one that has not completed a
+    single I/O since boot: Apple's firmware declares two such namespaces beside
+    the SSD, and they would be two flat lines forever.
+
+    /proc/diskstats counts sectors of 512 bytes whatever the drive's own sector
+    size, and io_ticks as milliseconds with at least one I/O in flight.
     """
     counters: dict[str, tuple[int, ...]] = {}
     for line in (slurp("/proc/diskstats") or "").splitlines():
@@ -246,6 +250,9 @@ def disk_counters() -> dict[str, tuple[int, ...]]:
         reads, sectors_read, writes, sectors_written, io_ms = (
             int(fields[field]) for field in (3, 5, 7, 9, 12)
         )
+        capacity = (slurp(f"/sys/block/{name}/size") or "").strip()
+        if reads + writes == 0 or capacity == "0":
+            continue
         counters[name] = (reads, sectors_read, writes, sectors_written, io_ms)
     return counters
 
