@@ -1,6 +1,7 @@
 import EosStats from '../components/EosStats'
 import SnapshotTile from '../components/SnapshotTile'
 import TimeSeriesTile from '../components/TimeSeriesTile'
+import { formatNumber, mibParts } from '../lib/format'
 import { LOAD, PERCENT, RATE, SHARE, TEMPERATURE } from '../lib/scale'
 
 /** `stats/collect.py`, run by a systemd timer on the server. */
@@ -8,6 +9,23 @@ const SOURCE = 'eos-stats'
 
 /** A gauge: one reading per sample, averaged over the bucket. */
 const gauge = (path: string) => `avg(${path}::DOUBLE)`
+
+/** Memory in MiB as GB, the absolute behind the percentage: `3.7 GB of 16.4 GB`. */
+const memoryNote = (values: (number | null)[]) => {
+  const [used, total] = values
+  if (used == null) return null
+  const amount = mibParts(used)
+  const whole = total == null ? null : mibParts(total)
+  return whole
+    ? `${amount.value} ${amount.unit} of ${whole.value} ${whole.unit}`
+    : `${amount.value} ${amount.unit}`
+}
+
+/** The absolute behind the disk percentage: `13.2 GB used`. */
+const diskNote = (values: (number | null)[]) => {
+  const [used] = values
+  return used == null ? null : `${formatNumber(used)} GB used`
+}
 
 /**
  * The server itself: CPU, memory, containers, disk, network, battery. A strip of
@@ -38,7 +56,16 @@ export default function Eos() {
         source={SOURCE}
         yLabel="Used [%]"
         yFit={PERCENT}
-        series={[{ label: 'Memory', expr: gauge('data.memory.used_pct') }]}
+        series={[
+          {
+            label: 'Memory',
+            expr: gauge('data.memory.used_pct'),
+            // The tooltip says what the percentage is a percentage of; a
+            // second line on this axis would be MB against a 0-100 scale.
+            extras: [gauge('data.memory.used_mb'), gauge('data.memory.total_mb')],
+            note: memoryNote,
+          },
+        ]}
       />
       <TimeSeriesTile
         title="Load average"
@@ -52,7 +79,14 @@ export default function Eos() {
         source={SOURCE}
         yLabel="Root filesystem [%]"
         yFit={PERCENT}
-        series={[{ label: 'Disk', expr: gauge('data.disk.used_pct') }]}
+        series={[
+          {
+            label: 'Disk',
+            expr: gauge('data.disk.used_pct'),
+            extras: [gauge('data.disk.used_gb')],
+            note: diskNote,
+          },
+        ]}
       />
       <TimeSeriesTile
         title="Battery charge"

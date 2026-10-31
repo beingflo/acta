@@ -10,6 +10,16 @@ export type Series = {
    * silently wrong (e.g. `avg(data.temperature)` vs `avg(data.temperature::DOUBLE)`).
    */
   expr: string
+  /**
+   * Aggregates of the same bucket that are fetched for the tooltip but never
+   * plotted: the absolute a percentage stands for, such as memory in MB or disk
+   * in GB. Drawn on the chart's axis they would be a second quantity in another
+   * unit, so they only reach `note`.
+   */
+  extras?: string[]
+  /** The tooltip's second line for this series, given `extras` in order. Null
+   *  leaves the line out, for a bucket whose row carries no reading. */
+  note?: (values: (number | null)[]) => string | null
 }
 
 const UNITS: Record<string, number> = {
@@ -92,7 +102,18 @@ export function timeSeriesSql(options: {
   to: Date
 }): string {
   const aggregates = options.series.map((s, i) => `${s.expr} AS s${i}`).join(',\n         ')
-  const fields = options.series.map((_, i) => `s${i} := s${i}`).join(', ')
+  // The tooltip's absolutes ride in the same bucket: one more aggregate per
+  // `extras` entry, packed into the point with the plotted columns.
+  const extras = options.series.flatMap((s, i) =>
+    (s.extras ?? []).map((expr, j) => `${expr} AS x${i}_${j}`),
+  )
+  const columns = [aggregates, ...extras].join(',\n         ')
+  const fields = options.series
+    .flatMap((s, i) => [
+      `s${i} := s${i}`,
+      ...(s.extras ?? []).map((_, j) => `x${i}_${j} := x${i}_${j}`),
+    ])
+    .join(', ')
   const source =
     options.source === undefined ? '' : `\n    AND source = '${escape(options.source)}'`
   // `timestamp` is TIMESTAMPTZ; cast to naive UTC before time functions. The
@@ -103,7 +124,7 @@ export function timeSeriesSql(options: {
          )::VARCHAR
 FROM (
   SELECT time_bucket(INTERVAL '${options.bucket}', CAST(timestamp AS TIMESTAMP)) AS b,
-         ${aggregates}
+         ${columns}
   FROM events
   WHERE timestamp >= TIMESTAMPTZ '${options.from.toISOString()}'
     AND timestamp <  TIMESTAMPTZ '${options.to.toISOString()}'${source}

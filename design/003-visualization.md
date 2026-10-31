@@ -17,8 +17,11 @@ The read path reads `data/*.parquet`. The file is sorted by source and then time
 every other source's row groups and each row group's Variant payload stays homogeneous enough to shred.
 
 The UI is light-mode only and deliberately minimal: white cards with hairline borders, text-only controls, centered
-tile titles, and one thin line per series with a faint wash of the same hue under the curve. Every series is drawn in
-one green so the dashboards read as a family rather than a per-quantity color code.
+tile titles, and one thin line per series with a faint wash of the same hue under the curve. Lines are dark — a light
+tint vanishes against the white card at one pixel — and the palette is short and fixed: green for the data, and a
+darker green for a second series, so a tile with two sensors (the room temperature from each of them) can tell its
+lines apart without a second hue making the pair read as two different quantities. Each series carries its own faint
+wash.
 Hovering a tile and pressing `v` expands it to fill the viewport;
 `v`, `Escape` or the tile's × restores it. Chart tiles get the whole plot, the event tables the whole list, which
 simply pages in as many extra rows as the taller viewport shows.
@@ -86,7 +89,8 @@ The following dashboards are implemented:
 The CO2 tile spans the full width. The other tiles are half width, two per row.
 
 - CO2 (`co2-sensor-living-room`) time x co2 ppm
-- Temperature (`co2-sensor-living-room`) time x temperature °C
+- Temperature (`co2-sensor-living-room` and `brightness-barometer-living-room`) time x temperature °C, one line per
+  sensor: the two sit in the same room, so their offset is what makes the pair worth drawing
 - Brightness (`brightness-barometer-living-room`) time x lux
 - Humidity (`co2-sensor-living-room`) time x humidity %
 - Pressure (`brightness-barometer-living-room`) time x pressure hPa
@@ -251,15 +255,19 @@ is a few thousand rows. `trip` summaries carry no position and are filtered out,
 
 ## Summary strip
 
-Above the charts, one small card per chart repeats its newest value in the selected range, with the unit and a swatch
-in the chart's colour. The tiles publish those values as they load, so the strip costs no extra queries and can never
-disagree with the right-hand end of the chart.
+Above the charts, one small card per series repeats its newest value in the selected range, with the unit and a swatch
+in the series' shade. A tile with more than one line names the line in the card's title, since two cards under one tile
+title would not say which sensor each belongs to. The tiles publish those values as they load, so the strip costs no
+extra queries and can never disagree with the right-hand end of the chart.
 
 ## Charts
 
 Time series are drawn with uPlot. A crosshair follows the pointer and a small tooltip next to it shows the bucket's
-timestamp and each series' value with its unit. That cursor is shared by every tile, so hovering one shows the same
-instant on all of them. Only x is shared — each tile has its own y scale — so the tiles that merely follow show the
+timestamp and each series' value with its unit, and — where the plotted value is a percentage — the absolute it stands
+for as a second line (memory and disk in GB). The absolute is fetched in the same bucket as the plotted column and
+never drawn: on the tile's axis it would be a second quantity in another unit. That cursor is shared by every tile,
+so hovering one shows the same instant on all of them. Only x is shared — each tile has its own y scale — so the tiles
+that merely follow show the
 vertical line with their tooltip pinned to the top of the plot, and a horizontal line only on the tile being hovered.
 A maximized tile is the only chart on screen, so it is the only one that takes part in that sharing.
 Dragging horizontally selects a custom range; a short drag is ignored, so it still reads as a click.

@@ -2,12 +2,12 @@ import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 
-import { fetchData, fetchSeries } from '../lib/api'
+import { fetchData, fetchSeries, type SeriesMetric } from '../lib/api'
 import { exitFullscreen, fullscreenTile, setHoveredTile } from '../lib/fullscreen'
 import ExpandButton from './ExpandButton'
 import { axisTickLabels, formatBucket, formatNumber, formatTimestamp, unitOf } from '../lib/format'
 import { clearReadings, claimReadingOrder, publishReadings } from '../lib/latest'
-import { BAR_FILL, fillFor, STROKE } from '../lib/palette'
+import { BAR_FILL, fillFor, strokeFor } from '../lib/palette'
 import { bucketFor, timeSeriesSql, toAligned, type Series } from '../lib/query'
 import { fitRange, type YFit } from '../lib/scale'
 import { range, setCustomRange } from '../lib/range'
@@ -106,16 +106,15 @@ export default function TimeSeriesTile(props: {
   title: string
   /** Omit to aggregate every source, as the acta dashboard does. */
   source?: string
-  /** The SQL the owner's credential may write. Omit when `metric` is given. */
+  /** The SQL the owner's credential may write. Omit when `metrics` is given. */
   series?: Series[]
   /**
-   * A reading the service defines (`service/src/metrics.rs`), for dashboards a
+   * Readings the service defines (`service/src/metrics.rs`), for dashboards a
    * restricted viewer may open: the tile then asks `/api/series` and never sends
-   * SQL of its own.
+   * SQL of its own. Several draw several lines, each in its own shade of the
+   * chart green, named by its label in the tooltip.
    */
-  metric?: string
-  /** The legend and tooltip name for a `metric` tile. */
-  label?: string
+  metrics?: SeriesMetric[]
   yLabel?: string
   height?: number
   wide?: boolean
@@ -153,11 +152,11 @@ export default function TimeSeriesTile(props: {
    */
   query?: (from: Date, to: Date) => string
 }) {
-  // A metric tile has exactly one series; a SQL tile has as many as it was
+  // A metric tile draws one line per reading; a SQL tile as many as it was
   // given. Everything below reads `series()` rather than the prop.
   const series = (): Series[] =>
-    props.metric
-      ? [{ label: props.label ?? props.title, expr: props.metric }]
+    props.metrics
+      ? props.metrics.map((entry) => ({ label: entry.label, expr: entry.metric }))
       : (props.series ?? [])
 
   const id = props.title
@@ -192,18 +191,32 @@ export default function TimeSeriesTile(props: {
   // uPlot: the tooltip and the cards must show each series, not its cumulative
   // height.
   let raw: Columns = [[]]
+  // Tooltip lines drawn from a series' `extras`, keyed by the point's epoch
+  // milliseconds — the same `t` the query returned, so a point and its row meet
+  // exactly however the reply was laid out on the bucket grid.
+  let notes = new Map<number, (string | null)[]>()
   let selectTimer = 0
 
   /** Colour that stands for a series in the tooltip and on the chart. */
-  const colorOf = (index: number) => (props.bars ? (props.fills?.[index] ?? BAR_FILL) : STROKE)
+  const colorOf = (index: number) =>
+    props.bars ? (props.fills?.[index] ?? BAR_FILL) : strokeFor(index)
 
-  /** Hand one card per series to the summary strip. */
+  /**
+   * Hand one card per series to the summary strip. A tile that draws more than
+   * one line names the line in the card's title: two cards called "Living room
+   * temperature" would say nothing about which sensor each one belongs to.
+   */
   const publish = (values: (number | null)[]) => {
     const unit = unitOf(props.yLabel)
+    const drawn = series()
     publishReadings(
       id,
       order,
-      series().map((_, index) => ({ title: props.title, unit, value: values[index] ?? null })),
+      drawn.map((entry, index) => ({
+        title: drawn.length > 1 ? `${props.title} · ${entry.label}` : props.title,
+        unit,
+        value: values[index] ?? null,
+      })),
     )
   }
 
@@ -220,6 +233,28 @@ export default function TimeSeriesTile(props: {
       }
       return null
     })
+
+  /**
+   * The tooltip's second lines, one per series that has a `note`: the absolute
+   * each bucket's percentage stands for, built from the row the tile already
+   * fetched. Buckets whose extras are all missing are left out, so the tooltip
+   * shows nothing rather than an empty line.
+   */
+  const noteMap = (rows: Array<Record<string, number | string>>) => {
+    const map = new Map<number, (string | null)[]>()
+    for (const row of rows) {
+      const lines = series().map((entry, i) => {
+        if (!entry.note) return null
+        const values = (entry.extras ?? []).map((_, j) => {
+          const value = row[`x${i}_${j}`]
+          return typeof value === 'number' ? value : null
+        })
+        return entry.note(values)
+      })
+      if (lines.some((line) => line !== null)) map.set(Math.round(Number(row.t) * 1000), lines)
+    }
+    return map
+  }
 
   // Built imperatively, like the tooltip and for the same underlying reason:
   // uPlot owns everything inside `container`, and Solid clears the children of
@@ -240,7 +275,7 @@ export default function TimeSeriesTile(props: {
   // space `cursor.left`/`cursor.top` are reported in.
   let tooltip: HTMLDivElement | undefined
   let tooltipTime: HTMLDivElement | undefined
-  let tooltipValues: HTMLSpanElement[] = []
+  let tooltipValues: { value: HTMLSpanElement; note: HTMLSpanElement }[] = []
 
   const buildTooltip = (over: HTMLElement) => {
     const box = document.createElement('div')
@@ -265,9 +300,13 @@ export default function TimeSeriesTile(props: {
       label.textContent = entry.label
       const value = document.createElement('span')
       value.className = 'chart-tooltip-value'
+      const text = document.createElement('span')
+      const note = document.createElement('span')
+      note.className = 'chart-tooltip-note'
+      value.append(text, note)
       row.append(label, value)
       box.append(row)
-      return value
+      return { value: text, note }
     })
 
     over.append(box)
@@ -287,10 +326,15 @@ export default function TimeSeriesTile(props: {
     const { from, to } = range()
     tooltipTime.textContent = formatTimestamp(x, to.getTime() - from.getTime())
     const unit = unitOf(props.yLabel)
+    const at = Math.round(x * 1000)
+    const lines = notes.get(at)
     series().forEach((_, index) => {
       const value = raw[index + 1]?.[idx]
-      tooltipValues[index].textContent =
+      const cell = tooltipValues[index]
+      cell.value.textContent =
         typeof value === 'number' ? `${formatNumber(value)}${unit ? ` ${unit}` : ''}` : '\u2014'
+      // The absolute the plotted value stands for, when the series carries one.
+      cell.note.textContent = lines?.[index] ?? ''
     })
 
     // Keep the box inside the plot: offset from the crosshair, flipping when
@@ -331,7 +375,7 @@ export default function TimeSeriesTile(props: {
         props.bars
           ? {
               label: s.label,
-              stroke: STROKE,
+              stroke: colorOf(index),
               width: 0,
               fill: colorOf(index),
               // 80% of the bucket width, at most 24px: a bucket is a census of
@@ -344,8 +388,10 @@ export default function TimeSeriesTile(props: {
             }
           : {
               label: s.label,
-              stroke: STROKE,
+              stroke: strokeFor(index),
               width: 1,
+              // Every series carries its own wash; each fades to the baseline,
+              // so a lower series simply paints over the upper one's.
               fill: fillFor,
               // A bucket that holds no sample keeps its slot as null, and a null
               // breaks the line. A series sampled less often than the bucket —
@@ -358,7 +404,13 @@ export default function TimeSeriesTile(props: {
               // set to undefined — uPlot merges options over its defaults, and an
               // explicit `paths: undefined` leaves it with no path builder at all.
               ...(props.step ? { paths: uPlot.paths.stepped!({ align: 1 }) } : {}),
-              points: { show: () => showDots, size: 4, width: 1, stroke: STROKE, fill: STROKE },
+              points: {
+                show: () => showDots,
+                size: 4,
+                width: 1,
+                stroke: strokeFor(index),
+                fill: strokeFor(index),
+              },
             },
       ),
     ],
@@ -420,7 +472,10 @@ export default function TimeSeriesTile(props: {
         : props.yFit
           ? { x: { time: true, range: () => xWindow }, y: { range: fitRange(props.yFit) } }
           : { x: { time: true, range: () => xWindow } },
-    legend: { show: series().length > 1 && !props.stacked },
+    // No legend: the tile's title names the chart and the hover tooltip names
+    // each line (with its own swatch), so a legend would only take height off
+    // the plot — enough of it to push the chart under the tile below.
+    legend: { show: false },
     cursor: {
       drag: { x: true, y: false, setScale: false },
       // uPlot shares the cursor between every tile with this key. Only x means
@@ -496,9 +551,9 @@ export default function TimeSeriesTile(props: {
     const request = ++requestId
     if (!background) setLoading(true)
     try {
-      const rows = props.metric
+      const rows = props.metrics
         ? await fetchSeries<Array<Record<string, number | string>>>(
-            props.metric,
+            props.metrics.map((entry) => entry.metric),
             bucket.ms,
             from,
             to,
@@ -518,6 +573,7 @@ export default function TimeSeriesTile(props: {
         for (let i = 1; i < columns.length; i++) columns[i].push(0)
       }
       raw = columns
+      notes = noteMap(rows ?? [])
       const xs = columns[0]
       xWindow = [
         Math.min(from.getTime() / 1000, xs[0] ?? Infinity),

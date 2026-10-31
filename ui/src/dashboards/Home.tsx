@@ -13,50 +13,48 @@ export default function Home() {
       <TimeSeriesTile
         wide
         title="Living room CO₂"
-        metric="co2_ppm"
-        label="CO₂"
+        metrics={[{ metric: 'co2_ppm', label: 'CO₂' }]}
         yLabel="CO₂ [ppm]"
         yFit={{ floor: 0, pad: 0.1, span: 200 }}
       />
       <TimeSeriesTile
         title="Living room temperature"
-        metric="living_temp_c"
-        label="Temperature"
+        // Two sensors in the same room: the air sensor's reading and the one on
+        // the brightness/barometer. Their offset is the interesting part.
+        metrics={[
+          { metric: 'living_temp_c', label: 'CO₂ sensor' },
+          { metric: 'brightness_temp_c', label: 'Barometer' },
+        ]}
         yLabel="Temperature [°C]"
         yFit={TEMPERATURE}
       />
       <TimeSeriesTile
         title="Living room brightness"
-        metric="brightness_lux"
-        label="Brightness"
+        metrics={[{ metric: 'brightness_lux', label: 'Brightness' }]}
         yLabel="Brightness [lux]"
         yFit={RATE}
       />
       <TimeSeriesTile
         title="Living room humidity"
-        metric="living_humidity_pct"
-        label="Humidity"
+        metrics={[{ metric: 'living_humidity_pct', label: 'Humidity' }]}
         yLabel="Humidity [%]"
         yFit={PERCENT}
       />
       <TimeSeriesTile
         title="Living room pressure"
-        metric="living_pressure_hpa"
-        label="Pressure"
+        metrics={[{ metric: 'living_pressure_hpa', label: 'Pressure' }]}
         yLabel="Pressure [hPa]"
         yFit={{ pad: 0.2, span: 10 }}
       />
       <TimeSeriesTile
         title="Laundry room humidity"
-        metric="laundry_humidity_pct"
-        label="Humidity"
+        metrics={[{ metric: 'laundry_humidity_pct', label: 'Humidity' }]}
         yLabel="Humidity [%]"
         yFit={PERCENT}
       />
       <TimeSeriesTile
         title="Laundry room temperature"
-        metric="laundry_temp_c"
-        label="Temperature"
+        metrics={[{ metric: 'laundry_temp_c', label: 'Temperature' }]}
         yLabel="Temperature [°C]"
         yFit={TEMPERATURE}
       />

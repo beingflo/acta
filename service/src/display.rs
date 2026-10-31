@@ -212,7 +212,7 @@ async fn series(
     })?;
     let json = state
         .db
-        .query_json(metrics::series_sql(metric, from, to, bucket_ms))
+        .query_json(metrics::series_sql(&[metric], from, to, bucket_ms))
         .await?;
     parse_series(&json, id)
 }

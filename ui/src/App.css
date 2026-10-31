@@ -407,6 +407,14 @@ body.fullscreen-tile {
   font-variant-numeric: tabular-nums;
 }
 
+/* The absolute a plotted value stands for (memory in GB behind a percentage),
+   on its own line under it: a second line of the same quantity in another unit
+   and none of the chart's ink. */
+.chart-tooltip-note {
+  display: block;
+  color: #6e6e6e;
+}
+
 /* Dashboards that put a stats strip, a chart and a table that fills the rest of
    the viewport on one page (Acta, Marending). The table keeps a floor height; a
    window too short for all three is scrolled by `main` rather than crushing the

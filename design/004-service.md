@@ -98,8 +98,10 @@ client-side.
 expose to someone who may only see part of the data — so restricted readers never send SQL. They name a **metric**
 (`service/src/metrics.rs`), which is a hand-written definition of one reading: its single source, its aggregate, and
 whether a restricted viewer may ask for it (opt-in per metric, so a new one is closed by default). The service builds the
-SQL, and the whole request surface is a metric id, a window and a bucket width — validated, then re-rendered, so nothing
-the caller typed reaches the query. A metric a viewer may not read answers exactly like one that does not exist.
+SQL, and the whole request surface is a list of metric ids (one line of the chart each), a window and a bucket width —
+validated, then re-rendered, so nothing the caller typed reaches the query; a metric a viewer may not read answers
+exactly like one that does not exist. Several readings are joined on the bucket, which is how one chart draws two
+sensors without the frontend ever seeing SQL.
 
 The home dashboard is written entirely in metrics, so both credentials render it through the same endpoint; the other
 dashboards still use `/api/data` and are the owner's alone. `/api/me` returns the scope so the picker offers a restricted

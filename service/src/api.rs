@@ -140,20 +140,34 @@ async fn me(Extension(scope): Extension<auth::Scope>) -> Response {
     Json(json!({ "scope": scope })).into_response()
 }
 
-/// One named reading over `[from, to)`, bucketed. This is the whole of a
-/// restricted reader's view of the data: a metric id, a window and a bucket
-/// width, all of which the service turns into SQL itself.
+/// The named readings over `[from, to)`, bucketed together. This is the whole of
+/// a restricted reader's view of the data: a list of metric ids, a window and a
+/// bucket width, all of which the service turns into SQL itself. One tile may
+/// ask for several readings, so a chart can draw two sensors side by side.
 async fn series(
     State(state): State<AppState>,
     Extension(scope): Extension<auth::Scope>,
     Json(request): Json<SeriesRequest>,
 ) -> Response {
-    let metric = match crate::metrics::lookup(&request.metric, scope) {
-        Ok(metric) => metric,
-        Err(message) => {
-            return (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response();
+    if request.metrics.is_empty() || request.metrics.len() > metrics::MAX_SERIES {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": format!("metrics must name 1 to {} readings", metrics::MAX_SERIES)
+            })),
+        )
+            .into_response();
+    }
+    let mut chosen = Vec::with_capacity(request.metrics.len());
+    for id in &request.metrics {
+        match crate::metrics::lookup(id, scope) {
+            Ok(metric) => chosen.push(metric),
+            Err(message) => {
+                return (StatusCode::BAD_REQUEST, Json(json!({ "error": message })))
+                    .into_response();
+            }
         }
-    };
+    }
     if request.bucket_ms < metrics::MIN_BUCKET_MS || request.bucket_ms > metrics::MAX_BUCKET_MS {
         return (
             StatusCode::BAD_REQUEST,
@@ -172,7 +186,7 @@ async fn series(
         }
     };
 
-    let sql = metrics::series_sql(metric, window.0, window.1, request.bucket_ms);
+    let sql = metrics::series_sql(&chosen, window.0, window.1, request.bucket_ms);
     let _read = state.data_lock.read().await;
     match state.db.query_json(sql).await {
         Ok(json) => ([(header::CONTENT_TYPE, "application/json")], json).into_response(),
@@ -190,7 +204,7 @@ fn parse_stamp(text: &str) -> Option<chrono::DateTime<chrono::Utc>> {
 
 #[derive(Deserialize)]
 struct SeriesRequest {
-    metric: String,
+    metrics: Vec<String>,
     bucket_ms: u64,
     from: String,
     to: String,

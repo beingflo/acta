@@ -39,6 +39,12 @@ export function byteParts(bytes: number): { value: string; unit: string } {
   return { value: `${bytes < 0 ? '-' : ''}${scaled.toFixed(digits)}`, unit: units[unit] }
 }
 
+/** MiB as a card's two-part byte value, the unit the collectors report memory
+ *  in: `{ value: '3.7', unit: 'GB' }`. */
+export function mibParts(mib: number): { value: string; unit: string } {
+  return byteParts(mib * 1024 ** 2)
+}
+
 /** A duration in milliseconds split into a number and its unit, for the stats
  *  strip and the request table: `{ value: '1.3', unit: 's' }`. */
 export function latencyParts(ms: number | null): { value: string; unit: string } | null {

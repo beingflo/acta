@@ -35,19 +35,28 @@ export function fetchData<T>(sql: string): Promise<T> {
   return post<T>('/api/data', { sql })
 }
 
+/** One named reading a chart may draw (`service/src/metrics.rs`). */
+export type SeriesMetric = {
+  /** The service's metric id. */
+  metric: string
+  /** The line's name in the tooltip. */
+  label: string
+}
+
 /**
- * One named reading, bucketed. This is what a restricted viewer's dashboard
- * asks for: the service owns the SQL, so the request names a metric and nothing
- * else.
+ * The named readings, bucketed together. This is what a restricted viewer's
+ * dashboard asks for: the service owns the SQL, so the request names metrics
+ * and nothing else. Several readings are joined on the bucket, which is how one
+ * chart draws two sensors.
  */
 export function fetchSeries<T>(
-  metric: string,
+  metrics: string[],
   bucketMs: number,
   from: Date,
   to: Date,
 ): Promise<T> {
   return post<T>('/api/series', {
-    metric,
+    metrics,
     bucket_ms: bucketMs,
     from: from.toISOString(),
     to: to.toISOString(),

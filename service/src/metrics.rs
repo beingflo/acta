@@ -55,6 +55,12 @@ pub const METRICS: &[Metric] = &[
         home: true,
     },
     Metric {
+        id: "brightness_temp_c",
+        source: "brightness-barometer-living-room",
+        expr: "avg(data.temperature::DOUBLE)",
+        home: true,
+    },
+    Metric {
         id: "living_pressure_hpa",
         source: "brightness-barometer-living-room",
         expr: "avg(data.pressure::DOUBLE)",
@@ -73,6 +79,10 @@ pub const METRICS: &[Metric] = &[
         home: true,
     },
 ];
+
+/// The most readings one tile may ask for. Past this a chart cannot be read out;
+/// the cap also keeps one request from building an enormous query.
+pub const MAX_SERIES: usize = 8;
 
 /// The narrowest bucket, and the widest, the endpoint accepts. A sub-second
 /// bucket is a client bug, and a bucket wider than the range returns a single
@@ -94,34 +104,64 @@ pub fn lookup(id: &str, scope: Scope) -> Result<&'static Metric, String> {
     Err(format!("unknown metric: {id}"))
 }
 
-/// One series over `[from, to)`, bucketed, in the `{ t, s0 }` shape the charts
-/// already consume. The expression comes from the registry, never from the
-/// request; only integers and validated timestamps reach the string.
+/// Bucketed series over `[from, to)`, in the `{ t, s0, s1, … }` shape the charts
+/// already consume: one column per metric, in the order asked.
+///
+/// Each metric is aggregated in its own CTE, because a metric only ever reads
+/// the one source it names, and the CTEs are full-joined on the bucket. Two
+/// sensors that sample at different rates therefore still line up on the same
+/// grid; a bucket only one of them saw keeps its own column and leaves the other
+/// null, which a line chart draws as a gap. The expressions come from the
+/// registry, never from the request; only integers and validated timestamps
+/// reach the string.
 pub fn series_sql(
-    metric: &Metric,
+    metrics: &[&Metric],
     from: DateTime<Utc>,
     to: DateTime<Utc>,
     bucket_ms: u64,
 ) -> String {
     let stamp = |at: DateTime<Utc>| at.to_rfc3339_opts(SecondsFormat::Millis, true);
-    format!(
-        "SELECT coalesce(
-           to_json(array_agg(struct_pack(t := epoch(b), s0 := s0) ORDER BY b)),
-           '[]'::JSON
-         )::VARCHAR
-FROM (
+    // The caller rejects an empty list, and there is no SQL to write for one.
+    debug_assert!(!metrics.is_empty(), "series_sql needs at least one metric");
+
+    let ctes: Vec<String> = metrics
+        .iter()
+        .enumerate()
+        .map(|(i, metric)| {
+            format!(
+                "m{i} AS (
   SELECT time_bucket(INTERVAL '{bucket_ms} MILLISECONDS', CAST(timestamp AS TIMESTAMP)) AS b,
-         {expr} AS s0
+         {expr} AS s{i}
   FROM events
   WHERE timestamp >= TIMESTAMPTZ '{from}'
     AND timestamp <  TIMESTAMPTZ '{to}'
     AND source = '{source}'
   GROUP BY 1
 )",
-        expr = metric.expr,
-        source = metric.source,
-        from = stamp(from),
-        to = stamp(to),
+                expr = metric.expr,
+                source = metric.source,
+                from = stamp(from),
+                to = stamp(to),
+            )
+        })
+        .collect();
+    let fields = (0..metrics.len())
+        .map(|i| format!("s{i} := s{i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut joined = String::from("m0");
+    for i in 1..metrics.len() {
+        joined.push_str(&format!(" FULL JOIN m{i} USING (b)"));
+    }
+
+    format!(
+        "WITH {ctes}
+SELECT coalesce(
+           to_json(array_agg(struct_pack(t := epoch(b), {fields}) ORDER BY b)),
+           '[]'::JSON
+         )::VARCHAR
+FROM {joined}",
+        ctes = ctes.join(", "),
     )
 }
 
@@ -158,7 +198,7 @@ mod tests {
         let metric = lookup("laundry_temp_c", Scope::Home).expect("metric");
         let from = "2026-10-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
         let to = "2026-10-02T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
-        let sql = series_sql(metric, from, to, 900_000);
+        let sql = series_sql(&[metric], from, to, 900_000);
 
         assert!(sql.contains("avg(data.temperature::DOUBLE)"));
         assert!(sql.contains("source = 'humidity-laundry-room'"));
@@ -166,5 +206,20 @@ mod tests {
         assert!(sql.contains("TIMESTAMPTZ '2026-10-01T00:00:00.000Z'"));
         // The request never supplies SQL, so no quoting can escape.
         assert!(!sql.contains(';'));
+    }
+
+    #[test]
+    fn two_metrics_are_joined_on_the_bucket() {
+        let living = lookup("living_temp_c", Scope::Home).expect("metric");
+        let barometer = lookup("brightness_temp_c", Scope::Home).expect("metric");
+        let from = "2026-10-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let to = "2026-10-02T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let sql = series_sql(&[living, barometer], from, to, 60_000);
+
+        assert!(sql.contains("m0 AS") && sql.contains("m1 AS"));
+        assert!(sql.contains("FULL JOIN m1 USING (b)"));
+        assert!(sql.contains("s0 := s0, s1 := s1"));
+        assert!(sql.contains("source = 'co2-sensor-living-room'"));
+        assert!(sql.contains("source = 'brightness-barometer-living-room'"));
     }
 }

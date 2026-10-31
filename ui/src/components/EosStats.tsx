@@ -1,14 +1,11 @@
 import { createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
 
 import { fetchData } from '../lib/api'
-import { byteParts, formatAge, formatCompact, formatNumber } from '../lib/format'
+import { formatAge, formatCompact, formatNumber, mibParts } from '../lib/format'
 import { type EosOverview, eosOverviewSql } from '../lib/query'
 import { range } from '../lib/range'
 import { autoRefresh } from '../lib/refresh'
 import StatsStrip, { type Stat } from './StatsStrip'
-
-/** MiB as a card's two-part byte value: `{ value: '1.6', unit: 'GB' }`. */
-const mib = (value: number) => byteParts(value * 1024 ** 2)
 
 /**
  * Scalars above the eos charts: how long the box has been up, whether it is
@@ -50,10 +47,10 @@ export default function EosStats(props: { source: string }) {
   const stats = createMemo((): Stat[] => {
     const sample = overview()
     const newestAge = sample?.newest == null ? null : Date.now() / 1000 - sample.newest
-    const memory = sample?.mem_avg_mb == null ? null : mib(sample.mem_avg_mb)
-    const total = sample?.mem_total_mb == null ? null : mib(sample.mem_total_mb)
+    const memory = sample?.mem_avg_mb == null ? null : mibParts(sample.mem_avg_mb)
+    const total = sample?.mem_total_mb == null ? null : mibParts(sample.mem_total_mb)
     const containerMemory =
-      sample?.containers_mem_mb == null ? null : mib(sample.containers_mem_mb)
+      sample?.containers_mem_mb == null ? null : mibParts(sample.containers_mem_mb)
     const cpuDetail = [
       sample?.cpu_peak == null ? null : `peak ${formatNumber(sample.cpu_peak)}%`,
       sample?.load1 == null ? null : `load ${formatNumber(sample.load1)}`,
