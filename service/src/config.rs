@@ -77,12 +77,12 @@ impl Settings {
                 "ACTA_COMPACTION_INTERVAL_MS",
                 60_000,
             )?),
-            compaction_grace: Duration::from_millis(env_parse(
-                "ACTA_COMPACTION_GRACE_MS",
-                30_000,
-            )?),
+            compaction_grace: Duration::from_millis(env_parse("ACTA_COMPACTION_GRACE_MS", 30_000)?),
             row_group_size: env_parse("ACTA_ROW_GROUP_SIZE", 250_000)?,
-            trash_retention: Duration::from_millis(env_parse("ACTA_TRASH_RETENTION_MS", 86_400_000)?),
+            trash_retention: Duration::from_millis(env_parse(
+                "ACTA_TRASH_RETENTION_MS",
+                86_400_000,
+            )?),
             trash_gc_interval: Duration::from_millis(env_parse(
                 "ACTA_TRASH_GC_INTERVAL_MS",
                 600_000,
@@ -129,7 +129,10 @@ fn parse_auth() -> Result<Auth, String> {
 }
 
 fn credential(user_key: &str, password_key: &str) -> Result<Option<Credential>, String> {
-    match (std::env::var(user_key).ok(), std::env::var(password_key).ok()) {
+    match (
+        std::env::var(user_key).ok(),
+        std::env::var(password_key).ok(),
+    ) {
         (None, None) => Ok(None),
         (Some(user), Some(password)) if !user.is_empty() && !password.is_empty() => {
             Ok(Some(Credential { user, password }))
@@ -212,7 +215,9 @@ fn s3_endpoint(endpoint: &str, allow_http: bool) -> Result<String, String> {
 }
 
 fn region_from_endpoint(endpoint: &str) -> Option<String> {
-    let rest = endpoint.split_once("://").map_or(endpoint, |(_, rest)| rest);
+    let rest = endpoint
+        .split_once("://")
+        .map_or(endpoint, |(_, rest)| rest);
     let host = rest.split('/').next().unwrap_or(rest);
     let host = host.split(':').next().unwrap_or(host);
     let region = host.strip_prefix("s3.")?.strip_suffix(".backblazeb2.com")?;

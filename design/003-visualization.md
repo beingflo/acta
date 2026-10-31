@@ -23,6 +23,12 @@ Hovering a tile and pressing `v` expands it to fill the viewport;
 `v`, `Escape` or the tile's × restores it. Chart tiles get the whole plot, the event tables the whole list, which
 simply pages in as many extra rows as the taller viewport shows.
 
+Each chart fits its own y axis to the data rather than taking the data's extent (`ui/src/lib/scale.ts`): a floor and a
+ceiling the quantity cannot leave, headroom of a fifth of the data's own extent, and a minimum span per quantity. A
+server idling at 0.5 % CPU therefore zooms in instead of lying flat at the bottom of a 0-100 scale, a nearly constant
+reading draws as a flat line across the middle rather than as amplified rounding noise, and the axis never leaves the
+bounds the quantity actually has. Bars start at zero with a little headroom above the tallest bucket.
+
 ## API
 
 The API consists of a single endpoint that accepts an SQL query in DuckDB dialect and returns the JSON document the
@@ -119,14 +125,23 @@ The server itself, sampled every 10 s by `stats/collect.py` — a systemd timer 
 `design/004-service.md` — into the `eos-stats` source: CPU usage and load, memory, disk space, network rates, battery
 charge and temperature, and `podman stats` per container (once a minute, since that costs a process spawn rather than a
 file read). Linux exposes no CPU temperature on this hardware: the firmware holds the core sensors, but the Devicetree
-wires up only the NAND, the battery hotspot, the charge regulator and the WiFi module, so the temperature chart at the
-top is the hottest of those, a board-level proxy, and the battery reading is the one true temperature of a component.
+wires up only the NAND, the battery hotspot, the charge regulator and the WiFi module, so the board temperature chart
+is the hottest of those, a board-level proxy, and the battery reading is the one true temperature of a component. The
+half-width tiles are laid out in pairs of the same subject, so the two container charts, the two network directions
+and the two temperature charts each sit side by side.
 
 The charts show the gauges worth a line over time: CPU, board temperature, memory, load, the filesystem behind `/`,
-container CPU and memory, network in and out, battery charge and temperature. Percentages are pinned to a 0-100 y axis, so a busy hour
-and a quiet one are drawn to the same scale. Everything the collector sends beyond those charts (per container, per
-mount) is in the "Latest sample" tile, which prints the newest row of the source flattened to `path · value` rows: a
-field a collector starts sending is readable without adding a tile for it.
+container CPU and memory, network in and out, battery charge and temperature. Above them a strip of scalars: how long
+the box has been up, the age of its newest sample, and the window's CPU, memory and board temperature — each as the
+average with its peak beside it, since an average says what the box did and the peak says how far it went — then the
+disk, battery and container figures of the newest sample, which are state rather than traffic. A gauge that only some
+samples carry (containers, every sixth) reads its last known value instead of dropping out of the window, and the age
+of the newest sample is taken over the whole dataset, so a stopped collector stays visible when the window is stepped
+back. Every chart fits its axis inside the quantity's own bounds, so an idle hour shows its own shape while the
+percentages still never leave 0-100.
+Everything the collector sends beyond those charts (per container, per mount) is in the "Latest sample" tile, which
+prints the newest row of the source flattened to `path · value` rows: a field a collector starts sending is readable
+without adding a tile for it.
 
 ### marending
 

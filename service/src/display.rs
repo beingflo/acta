@@ -429,10 +429,16 @@ mod tests {
         let bitmap = to_bitmap(&vec![255u8; (WIDTH * HEIGHT * 3) as usize]);
         assert_eq!(bitmap.len(), ROW_BYTES * HEIGHT as usize);
         assert_eq!(bitmap.len(), 99 * 272);
-        assert!(bitmap.iter().all(|byte| *byte == 0xff), "white is a set bit");
+        assert!(
+            bitmap.iter().all(|byte| *byte == 0xff),
+            "white is a set bit"
+        );
 
         let black = to_bitmap(&vec![0u8; (WIDTH * HEIGHT * 3) as usize]);
-        assert!(black.iter().all(|byte| *byte == 0x00), "black is a clear bit");
+        assert!(
+            black.iter().all(|byte| *byte == 0x00),
+            "black is a clear bit"
+        );
     }
 
     #[test]

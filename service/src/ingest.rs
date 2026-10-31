@@ -104,7 +104,8 @@ pub fn start(data_dir: PathBuf, opts: WriteOptions, lock: Arc<RwLock<()>>) -> In
     let writer_staging = storage::staging_dir(&data_dir);
     let writer_opts = opts.clone();
     let writer_task = tokio::spawn(async move {
-        if let Err(err) = writer_loop(flush_rx, writer_data_dir, writer_staging, writer_opts).await {
+        if let Err(err) = writer_loop(flush_rx, writer_data_dir, writer_staging, writer_opts).await
+        {
             tracing::error!(error = %err, "ingest writer loop stopped");
         }
     });
@@ -193,10 +194,7 @@ fn parse_timestamp_str(text: &str) -> Result<i64, String> {
     }
     // Overland writes `2015-10-01T08:00:00-0700`: an offset without the colon
     // RFC 3339 requires, so it needs its own format before the naive fallbacks.
-    for format in [
-        "%Y-%m-%dT%H:%M:%S%.f%z",
-        "%Y-%m-%d %H:%M:%S%.f%z",
-    ] {
+    for format in ["%Y-%m-%dT%H:%M:%S%.f%z", "%Y-%m-%d %H:%M:%S%.f%z"] {
         if let Ok(dt) = DateTime::parse_from_str(text, format) {
             return Ok(dt.timestamp_micros());
         }
@@ -341,7 +339,10 @@ async fn write_buffer(data_dir: &Path, staging: &Path, opts: &WriteOptions, rows
         }
     }
 
-    tracing::error!(rows = rows.len(), "dropping rows after repeated flush failures");
+    tracing::error!(
+        rows = rows.len(),
+        "dropping rows after repeated flush failures"
+    );
 }
 
 fn unique_hot_name(data_dir: &Path) -> String {

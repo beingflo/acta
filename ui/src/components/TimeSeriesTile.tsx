@@ -9,6 +9,7 @@ import { axisTickLabels, formatBucket, formatNumber, formatTimestamp, unitOf } f
 import { clearReadings, claimReadingOrder, publishReadings } from '../lib/latest'
 import { BAR_FILL, fillFor, STROKE } from '../lib/palette'
 import { bucketFor, timeSeriesSql, toAligned, type Series } from '../lib/query'
+import { fitRange, type YFit } from '../lib/scale'
 import { range, setCustomRange } from '../lib/range'
 import { autoRefresh } from '../lib/refresh'
 
@@ -127,6 +128,11 @@ export default function TimeSeriesTile(props: {
   fills?: string[]
   /** Fixed y bounds, for a value with a natural scale such as a percentage. */
   yRange?: [number, number]
+  /**
+   * Fit the y axis to the plotted data with headroom, instead of the fixed
+   * `yRange` — see `lib/scale.ts` for the presets and what each part means.
+   */
+  yFit?: YFit
   /**
    * Draw the line as a step: each value holds until the next point. For a state
    * that persists between samples, where a diagonal would invent a crossing the
@@ -401,9 +407,9 @@ export default function TimeSeriesTile(props: {
     // The x scale is the requested window rather than the extent of the data:
     // a window with no rows, or one that resolves to a single point, would
     // otherwise give a zero-width scale with no axis at all. Bars read their
-    // height from the y axis, so their scale has to start at zero, with a little
-    // headroom above the tallest bar; a line chart is free to use the full
-    // vertical space.
+    // height from the y axis, so theirs has to start at zero with a little
+    // headroom above the tallest bucket; a line chart's comes from `yRange` or
+    // `yFit`, and without either from uPlot's own extent.
     scales: props.bars
       ? {
           x: { time: true, range: () => xWindow },
@@ -411,7 +417,9 @@ export default function TimeSeriesTile(props: {
         }
       : props.yRange
         ? { x: { time: true, range: () => xWindow }, y: { range: () => props.yRange! } }
-        : { x: { time: true, range: () => xWindow } },
+        : props.yFit
+          ? { x: { time: true, range: () => xWindow }, y: { range: fitRange(props.yFit) } }
+          : { x: { time: true, range: () => xWindow } },
     legend: { show: series().length > 1 && !props.stacked },
     cursor: {
       drag: { x: true, y: false, setScale: false },

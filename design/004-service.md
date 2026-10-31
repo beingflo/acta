@@ -206,12 +206,15 @@ granularity of the backup; day files of a month that has already folded into a `
 uploaded if the service was down for the whole month, in which case the month file covers those rows.
 
 The bucket holds the file names verbatim under an optional `ACTA_S3_PREFIX`. Restore (`acta restore`, run as a
-one-shot container with the data volume mounted, see `mise run deploy:restore`) downloads every object; it merges, so
-existing files are kept and files the bucket does not carry are never removed. `mise run restore [dir]` runs the same
+one-shot container with the data volume mounted, see `mise run deploy:restore`) fetches the coarsest file the bucket
+carries for each span: an hour file is skipped when the bucket also holds its day file (or that day's month file), and
+a day file when it holds the month file. Restore only ever adds, so existing files are kept and files the bucket does
+not carry are never removed; the check is per object against the bucket listing, so a span left without a coarser file
+(the service was down at that fold) still comes back from its finer files. `mise run restore [dir]` runs the same
 restore locally with the release build and the credentials from `.deploy.secrets.enc`, which is how a dev dataset is
-rebuilt from the bucket; it defaults to the checkout's `data/`. A restore can contain both a finer tier and the
-coarser file that superseded it; the first compaction pass after startup reconciles them with the existing "target
-exists, so trash the inputs" rule, so duplicates are harmless.
+rebuilt from the bucket; it defaults to the checkout's `data/`. A directory that already held superseded files still
+has them reconciled by the first compaction pass after startup, with the existing "target exists, so trash the inputs"
+rule.
 
 Credentials come from `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (podman secrets); bucket, region, endpoint and
 prefix from the environment. The upload speaks the S3 protocol but is not tied to AWS: it runs against Backblaze B2,

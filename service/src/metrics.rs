@@ -97,7 +97,12 @@ pub fn lookup(id: &str, scope: Scope) -> Result<&'static Metric, String> {
 /// One series over `[from, to)`, bucketed, in the `{ t, s0 }` shape the charts
 /// already consume. The expression comes from the registry, never from the
 /// request; only integers and validated timestamps reach the string.
-pub fn series_sql(metric: &Metric, from: DateTime<Utc>, to: DateTime<Utc>, bucket_ms: u64) -> String {
+pub fn series_sql(
+    metric: &Metric,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+    bucket_ms: u64,
+) -> String {
     let stamp = |at: DateTime<Utc>| at.to_rfc3339_opts(SecondsFormat::Millis, true);
     format!(
         "SELECT coalesce(

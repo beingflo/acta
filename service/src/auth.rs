@@ -74,8 +74,11 @@ impl Throttle {
             }
         };
         state.failures += 1;
-        (state.failures > SIGN_IN_FAILURES)
-            .then(|| (SIGN_IN_WINDOW - now.duration_since(window)).as_secs().max(1))
+        (state.failures > SIGN_IN_FAILURES).then(|| {
+            (SIGN_IN_WINDOW - now.duration_since(window))
+                .as_secs()
+                .max(1)
+        })
     }
 
     /// A credential was accepted: the budget starts over.
@@ -167,7 +170,11 @@ impl Auth {
         if self.ui.as_ref().is_some_and(|c| c.matches(user, password)) {
             return Some(Scope::All);
         }
-        if self.home.as_ref().is_some_and(|c| c.matches(user, password)) {
+        if self
+            .home
+            .as_ref()
+            .is_some_and(|c| c.matches(user, password))
+        {
             return Some(Scope::Home);
         }
         None
@@ -390,9 +397,18 @@ mod tests {
             Some(credential("guest", "guestpw")),
             Some(credential("sensor", "sensorpw")),
         );
-        assert!(matches!(auth.role("owner", "ownerpw"), Some(Role::Ui(Scope::All))));
-        assert!(matches!(auth.role("guest", "guestpw"), Some(Role::Ui(Scope::Home))));
-        assert!(matches!(auth.role("sensor", "sensorpw"), Some(Role::Sensor)));
+        assert!(matches!(
+            auth.role("owner", "ownerpw"),
+            Some(Role::Ui(Scope::All))
+        ));
+        assert!(matches!(
+            auth.role("guest", "guestpw"),
+            Some(Role::Ui(Scope::Home))
+        ));
+        assert!(matches!(
+            auth.role("sensor", "sensorpw"),
+            Some(Role::Sensor)
+        ));
         assert!(auth.role("guest", "ownerpw").is_none());
         assert!(auth.role("owner", "nope").is_none());
     }
@@ -428,7 +444,8 @@ fn is_gps(request: &Request<Body>) -> bool {
     request.method() == Method::POST && request.uri().path().starts_with("/api/gps/")
 }
 
-fn bearer_token(headers: &HeaderMap) -> Option<String> {    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+fn bearer_token(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
     let token = value
         .strip_prefix("Bearer ")
         .or_else(|| value.strip_prefix("bearer "))?

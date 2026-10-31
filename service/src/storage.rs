@@ -104,7 +104,9 @@ pub fn list_tier_files(data_dir: &Path) -> std::io::Result<Vec<TierFile>> {
     Ok(files)
 }
 
-fn parse_name(name: &str) -> Option<(Tier, i64)> {
+/// Tier and bucket start of a file name, or `None` for anything the tiers do not
+/// describe (`_seed`, the migration's `data.parquet`).
+pub(crate) fn parse_name(name: &str) -> Option<(Tier, i64)> {
     let stem = name.strip_suffix(".parquet")?;
     if let Some(rest) = stem.strip_prefix("hot-") {
         // `hot-<flush_ms>`; a trailing `-<seq>` is tolerated for uniqueness.

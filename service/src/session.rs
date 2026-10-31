@@ -158,7 +158,10 @@ mod tests {
             sessions.verify(&token, now + chrono::Duration::days(59)),
             Some(Scope::Home)
         );
-        assert_eq!(sessions.verify(&token, now + chrono::Duration::days(61)), None);
+        assert_eq!(
+            sessions.verify(&token, now + chrono::Duration::days(61)),
+            None
+        );
     }
 
     #[test]
@@ -181,7 +184,10 @@ mod tests {
         let mut flipped = token.clone().into_bytes();
         let last = flipped.len() - 1;
         flipped[last] = if flipped[last] == b'A' { b'B' } else { b'A' };
-        assert_eq!(sessions.verify(&String::from_utf8(flipped).unwrap(), now), None);
+        assert_eq!(
+            sessions.verify(&String::from_utf8(flipped).unwrap(), now),
+            None
+        );
 
         assert_eq!(Sessions::new("battery staple").verify(&token, now), None);
         assert_eq!(sessions.verify("nonsense", now), None);
@@ -203,7 +209,10 @@ mod tests {
     #[test]
     fn the_token_is_read_out_of_a_cookie_header() {
         let mut headers = HeaderMap::new();
-        headers.insert(header::COOKIE, "other=1; acta_session=xyz; more=2".parse().unwrap());
+        headers.insert(
+            header::COOKIE,
+            "other=1; acta_session=xyz; more=2".parse().unwrap(),
+        );
         assert_eq!(token_from(&headers), Some("xyz"));
 
         headers.insert(header::COOKIE, "other=1".parse().unwrap());

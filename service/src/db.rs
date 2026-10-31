@@ -29,7 +29,10 @@ impl std::fmt::Display for QueryError {
         match self {
             QueryError::Timeout => write!(f, "query timed out"),
             QueryError::TooLarge { limit, actual } => {
-                write!(f, "response of {actual} bytes exceeds the {limit} byte limit")
+                write!(
+                    f,
+                    "response of {actual} bytes exceeds the {limit} byte limit"
+                )
             }
             QueryError::BadQuery(msg) => write!(f, "{msg}"),
             QueryError::Internal(msg) => write!(f, "{msg}"),
@@ -65,17 +68,29 @@ impl Db {
             .canonicalize()
             .map_err(|e| format!("data dir {}: {e}", options.data_dir.display()))?;
         if !data_dir.is_dir() {
-            return Err(format!("data dir {} is not a directory", data_dir.display()));
+            return Err(format!(
+                "data dir {} is not a directory",
+                data_dir.display()
+            ));
         }
 
-        let options = DbOptions { data_dir, ..options };
+        let options = DbOptions {
+            data_dir,
+            ..options
+        };
         let mut pool = Vec::with_capacity(options.pool_size);
         for _ in 0..options.pool_size {
             pool.push(connect(&options)?);
         }
         let permits = Arc::new(Semaphore::new(options.pool_size));
 
-        Ok(Self { inner: Arc::new(Inner { options, pool: Mutex::new(pool), permits }) })
+        Ok(Self {
+            inner: Arc::new(Inner {
+                options,
+                pool: Mutex::new(pool),
+                permits,
+            }),
+        })
     }
 
     /// The canonicalized data directory the pool reads from.

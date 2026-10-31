@@ -84,7 +84,10 @@ pub fn router(state: AppState, ui_dir: PathBuf, tiles_dir: PathBuf) -> Router {
             post(gps::upload).layer(DefaultBodyLimit::max(body_limit)),
         )
         .nest_service("/tiles", tiles)
-        .layer(middleware::from_fn_with_state(state.auth.clone(), auth::authorize));
+        .layer(middleware::from_fn_with_state(
+            state.auth.clone(),
+            auth::authorize,
+        ));
 
     Router::new()
         .route("/health", get(health))
@@ -109,7 +112,11 @@ async fn sign_in(
         return StatusCode::NO_CONTENT.into_response();
     };
     let Some(token) = sessions.issue(scope, chrono::Utc::now()) else {
-        return (StatusCode::INTERNAL_SERVER_ERROR, "no entropy for a session").into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "no entropy for a session",
+        )
+            .into_response();
     };
     let cookie = session::cookie(&token, session::is_secure(&headers));
     ([(header::SET_COOKIE, cookie)], StatusCode::NO_CONTENT).into_response()
@@ -143,7 +150,9 @@ async fn series(
 ) -> Response {
     let metric = match crate::metrics::lookup(&request.metric, scope) {
         Ok(metric) => metric,
-        Err(message) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response(),
+        Err(message) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response();
+        }
     };
     if request.bucket_ms < metrics::MIN_BUCKET_MS || request.bucket_ms > metrics::MAX_BUCKET_MS {
         return (
@@ -282,7 +291,9 @@ async fn ingest(State(state): State<AppState>, body: Bytes) -> Response {
     }
 
     let accepted = rows.len();
-    if accepted > 0 && let Err(err) = state.ingest.submit(rows).await {
+    if accepted > 0
+        && let Err(err) = state.ingest.submit(rows).await
+    {
         return ApiError::Internal(err).into_response();
     }
     (StatusCode::ACCEPTED, Json(json!({ "accepted": accepted }))).into_response()

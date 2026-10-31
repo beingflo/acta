@@ -325,6 +325,84 @@ FROM events
 WHERE ${requestWindow(source, from, to)}`
 }
 
+/** Scalars for the eos stats strip. Gauges come both as the window's average
+ *  and as its peak; the rest are the newest sample's reading, for the figures
+ *  that are state rather than traffic (disk, battery, containers). */
+export type EosOverview = {
+  /** Samples in the window: the collector runs every ten seconds. */
+  samples: number
+  /** Newest sample anywhere, in epoch seconds; null on an empty dataset. */
+  newest: number | null
+  uptime_s: number | null
+  cores: number | null
+  cpu_avg: number | null
+  cpu_peak: number | null
+  load1: number | null
+  mem_avg_mb: number | null
+  mem_total_mb: number | null
+  mem_peak_pct: number | null
+  temp_avg_c: number | null
+  temp_peak_c: number | null
+  disk_used_pct: number | null
+  disk_used_gb: number | null
+  boot_used_pct: number | null
+  charge_pct: number | null
+  battery_status: string | null
+  battery_power_w: number | null
+  containers: number | null
+  containers_cpu_pct: number | null
+  containers_mem_mb: number | null
+}
+
+/**
+ * Totals for the eos stats strip: the window's CPU, memory, board temperature
+ * and the newest sample's disk, battery and container figures, plus the age of
+ * the newest sample.
+ *
+ * The gauges are averaged *and* peaked: an average says what the box did over
+ * the window, the peak says how far it went — which is the question a server
+ * gets asked after the fact. Containers only ride along on every sixth sample
+ * (`stats/collect.py`), so their fields are read with `arg_max` rather than
+ * restricted to the last row. `newest` ignores the window, like the other
+ * strips, so freshness still tells the truth when the window is stepped back.
+ */
+export function eosOverviewSql(source: string, from: Date, to: Date): string {
+  // The last known value of a field: `arg_max` over the event time, so a field
+  // that only some samples carry still resolves to its most recent reading.
+  const latest = (expr: string) => `arg_max(${expr}, timestamp)`
+  const avg = (path: string) => `avg(TRY_CAST(${path} AS DOUBLE))`
+  const peak = (path: string) => `max(TRY_CAST(${path} AS DOUBLE))`
+  const current = (path: string) => latest(`TRY_CAST(${path} AS DOUBLE)`)
+  return `SELECT to_json(struct_pack(
+           samples := count(*),
+           newest := (SELECT epoch(CAST(max(timestamp) AS TIMESTAMP)) FROM events
+                      WHERE source = '${escape(source)}'),
+           uptime_s := ${latest('TRY_CAST(data.uptime_s AS BIGINT)')},
+           cores := ${latest('TRY_CAST(data.cores AS BIGINT)')},
+           cpu_avg := ${avg('data.cpu.usage_pct')},
+           cpu_peak := ${peak('data.cpu.usage_pct')},
+           load1 := ${current('data.cpu.load1')},
+           mem_avg_mb := ${avg('data.memory.used_mb')},
+           mem_total_mb := ${current('data.memory.total_mb')},
+           mem_peak_pct := ${peak('data.memory.used_pct')},
+           temp_avg_c := ${avg('data.temp.board_c')},
+           temp_peak_c := ${peak('data.temp.board_c')},
+           disk_used_pct := ${current('data.disk.used_pct')},
+           disk_used_gb := ${current('data.disk.used_gb')},
+           boot_used_pct := ${current('data.disk.boot_pct')},
+           charge_pct := ${current('data.battery.charge_pct')},
+           battery_status := ${latest('data.battery.status::VARCHAR')},
+           battery_power_w := ${current('data.battery.power_w')},
+           containers := ${latest('TRY_CAST(data.containers_total.count AS BIGINT)')},
+           containers_cpu_pct := ${current('data.containers_total.cpu_pct')},
+           containers_mem_mb := ${current('data.containers_total.mem_mb')}
+         ))::VARCHAR
+FROM events
+WHERE source = '${escape(source)}'
+  AND timestamp >= TIMESTAMPTZ '${from.toISOString()}'
+  AND timestamp <  TIMESTAMPTZ '${to.toISOString()}'`
+}
+
 /** Number of rows in the window, or in `[from, cursor]` when a cursor is given,
  *  across every source. */
 export function eventCountSql(from: Date, to: Date, cursorUs?: number): string {
