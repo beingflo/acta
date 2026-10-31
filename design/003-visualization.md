@@ -320,13 +320,16 @@ whenever `all` is chosen.
 
 ## Refresh
 
-Only a live window is polled: a selection that ends at the wall clock and spans at most two hours — the 1h preset,
-or a custom range ending now. It refreshes every 10 s, with a little jitter, so the dashboard follows a live feed; a
-small mark next to the range buttons says when this is on. Any other window is a historical snapshot, fetched when it
-is selected and then left alone, so 6h, 1d, 30d and `all` do not poll. Charts, tables and the scalar strips share the
+Only a live window is polled: a selection that ends at the wall clock and spans at most six hours — the 1h and 6h
+presets, or a custom range ending now. It refreshes every 10 s, with a little jitter, so the dashboard follows a live
+feed; a small mark next to the range buttons says when this is on. Any other window is a historical snapshot, fetched
+when it is selected and then left alone, so 1d, 30d and `all` do not poll. Charts, tables and the scalar strips share the
 policy. `r` reloads the data of the current view immediately, live or not, without touching the range — the live mark
-flashes to acknowledge it — and returning to a backgrounded tab reloads a live window at once instead of waiting out a
-throttled timer.
+flashes to acknowledge it.
+
+A hidden tab polls nothing: its refresh timers are cleared when the tab goes away and restarted when it comes back.
+Returning reloads at once for any window up to 30 days — live or a snapshot, since re-reading a month is cheap and the
+rows may have changed meanwhile — and leaves a year or `all` to an explicit `r`.
 
 No bounds polling is involved. The extents are needed only for `all`, so they are read when the page loads, whenever
 `all` is chosen, when the tab becomes visible while `all` is open, and on a manual refresh.
