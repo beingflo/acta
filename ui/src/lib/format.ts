@@ -64,6 +64,25 @@ export function formatAge(seconds: number): string {
   return `${Math.round(value / 86_400)} d`
 }
 
+/** A window length in the shortest form that still reads: 45s, 12m, 3h, 4d,
+ *  3mo, 1y. Rounded hard on purpose — it answers "how much am I looking at",
+ *  while the two datetime fields beside it already say exactly which window. */
+export function formatSpan(ms: number): string {
+  const seconds = Math.max(0, ms) / 1_000
+  if (seconds < 90) return `${Math.round(seconds)}s`
+  const minutes = seconds / 60
+  if (minutes < 90) return `${Math.round(minutes)}m`
+  const hours = minutes / 60
+  if (hours < 36) return `${Math.round(hours)}h`
+  const days = hours / 24
+  if (days < 60) return `${Math.round(days)}d`
+  // Months and years are calendar-flavoured averages, which is all this label
+  // is: 30.44 days a month and 365 a year.
+  if (days < 365) return `${Math.round(days / 30.44)}mo`
+  const years = days / 365
+  return `${years < 10 ? Math.round(years * 10) / 10 : Math.round(years)}y`
+}
+
 /** A bucket width for a bar chart's subtitle: 500 ms, 30 s, 5 min, 6 h, 2 d. */
 export function formatBucket(ms: number): string {
   if (ms < 1_000) return `${Math.round(ms)} ms`

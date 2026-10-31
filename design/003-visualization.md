@@ -291,7 +291,9 @@ load shows the spinner.
 
 A fixed date range picker is always visible on the top right as a list of buttons: `all 1y 30d 7d 1d 6h 1h C`
 As an example, the 30d button sets the selected time range to `[now - 30d, now]`, while `all` spans the full data range
-(earliest to newest point). The C button opens from / to datetime inputs underneath for custom ranges. A range renamed
+(earliest to newest point). The C button opens from / to datetime inputs underneath for custom ranges, with a short
+approximate length of the window in front of them (`~2h`, `~4d`, `~3mo`) — brushing a chart picks a window by eye, and
+the span is the one thing the two fields do not say at a glance. A range renamed
 in the URL (`?range=30m`) still resolves to its replacement (`1h`), so an older link keeps working.
 
 A custom range whose end was within two minutes of the wall clock when it was chosen — a brush up to the right edge

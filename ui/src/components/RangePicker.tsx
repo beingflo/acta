@@ -1,5 +1,6 @@
 import { createEffect, createSignal, For, on, onCleanup, onMount } from 'solid-js'
 
+import { formatSpan } from '../lib/format'
 import { PRESETS, preset, range, setCustomRange, setPreset } from '../lib/range'
 import { refreshTick } from '../lib/refresh'
 
@@ -61,6 +62,11 @@ export default function RangePicker() {
       </div>
       {isCustom() && (
         <div class="custom-range">
+          {/* How much of the record the two fields below add up to: brushing a
+              chart picks a window by eye, and a span is what the eye lacks. */}
+          <span class="custom-span" title="Approximate length of the selected range">
+            ~{formatSpan(range().to.getTime() - range().from.getTime())}
+          </span>
           <input
             type="datetime-local"
             value={toInputValue(range().from)}
