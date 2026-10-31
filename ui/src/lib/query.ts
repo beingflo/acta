@@ -72,6 +72,13 @@ export type Bucket = {
   ms: number
 }
 
+/** The narrowest bucket `/api/series` accepts (`service/src/metrics.rs`). A
+ *  metric tile must not ask for anything finer: a wide tile over a short window
+ *  would pick 500 ms and the service answers 400, which the tile can only show
+ *  as an empty chart. SQL tiles are not affected — their bucket is written into
+ *  the query, so sub-second buckets work there. */
+export const METRIC_MIN_BUCKET_MS = 1_000
+
 /**
  * Pick a bucket width for at most one point per `pxPerBucket` pixels, snapped to
  * a nice interval. Rounded up, not down: a finer bucket would return more points
@@ -79,12 +86,21 @@ export type Bucket = {
  * for nothing. Keeps the response small no matter how wide the range is, and
  * lets bars be spaced more coarsely than a line's points.
  */
-export function bucketFor(from: Date, to: Date, widthPx: number, pxPerBucket = 1): Bucket {
+export function bucketFor(
+  from: Date,
+  to: Date,
+  widthPx: number,
+  pxPerBucket = 1,
+  /** The narrowest bucket the caller's endpoint accepts; see
+   *  `METRIC_MIN_BUCKET_MS`. Zero leaves the whole ladder available. */
+  minMs = 0,
+): Bucket {
   const points = Math.max(widthPx / pxPerBucket, 1)
   const target = Math.max((to.getTime() - from.getTime()) / points, 1)
   let best = NICE[NICE.length - 1]
   for (const candidate of NICE) {
-    if (candidate[0] * UNITS[candidate[1]] >= target) {
+    const ms = candidate[0] * UNITS[candidate[1]]
+    if (ms >= target && ms >= minMs) {
       best = candidate
       break
     }

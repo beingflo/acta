@@ -58,7 +58,8 @@ relying on `now()`, so a given query string always returns the same rows.
 The frontend knows the pixel width of each time-axis tile and the selected range, so it also picks the resolution: it
 chooses a bucket width (for example `time_bucket(INTERVAL '5 minutes', timestamp)`) targeting roughly one point per
 pixel and bakes it into the query. Narrow ranges return raw points, wide ranges are aggregated aggressively, keeping
-responses small.
+responses small. A metric tile cannot go as fine as the charts would like — `/api/series` refuses a sub-second bucket —
+so its width is floored at one second rather than asking for a bucket the service will reject.
 
 Buckets are UTC-aligned and the browser renders timestamps in the viewer's local timezone. The service's DuckDB build
 has no ICU extension, so timestamps are cast to a naive UTC timestamp before any time function is used.

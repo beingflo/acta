@@ -244,12 +244,17 @@ export default function PagedTable<T extends CursoredRow>(props: {
   }
 
   /**
-   * Find an anchor close to `target` by bisecting on `count(timestamp <= t)`.
+   * Find an anchor at or before `target` by bisecting on `count(timestamp <= t)`.
    * Each step is one cheap count query; it stops as soon as the remaining gap
    * can be bridged with a bounded offset, which for event data is a couple of
    * steps rather than the ~40 a fixed-precision search would need.
+   *
+   * The count is of the rows *up to* the cursor, and the table lists rows newest
+   * first, so those rows are the end of the list: the newest one sits at index
+   * `total - n`, not `n - 1`. Reading it as `n - 1` searched from the wrong end
+   * and anchored pages at an arbitrary place in the window.
    */
-  const bisect = async (target: number, current: number): Promise<Anchor> => {
+  const bisect = async (target: number, total: number, current: number): Promise<Anchor> => {
     const { from, to } = range()
     let lo = from.getTime()
     let hi = to.getTime()
@@ -259,16 +264,18 @@ export default function PagedTable<T extends CursoredRow>(props: {
       const cursorUs = mid * 1000
       const counts = await fetchData<{ n: number }>(props.countSql(from, to, cursorUs))
       if (current !== token) return best
-      const n = counts?.n ?? 0
-      if (n === 0) {
+      const index = total - (counts?.n ?? 0)
+      if (index > target) {
+        // The cursor's row is older than the target row: search towards now.
         lo = mid
         continue
       }
-      const index = n - 1
-      if (Math.abs(target - index) <= MAX_SKIP) return { index, cursorUs }
+      // Only an anchor at or above the target can be used: a page is fetched
+      // downwards from it with `offset = target - index`, which cannot go back.
+      if (target - index <= MAX_SKIP) return { index, cursorUs }
       best = { index, cursorUs }
-      if (index < target) lo = mid
-      else hi = mid
+      // The cursor's row is newer than the target row: search towards the past.
+      hi = mid
     }
     return best
   }
@@ -278,7 +285,7 @@ export default function PagedTable<T extends CursoredRow>(props: {
   const fetchPage = async (page: number, current: number): Promise<T[] | null> => {
     const start = page * PAGE_ROWS
     let anchor = nearestAnchor(start)
-    if (start - anchor.index > MAX_SKIP) anchor = await bisect(start, current)
+    if (start - anchor.index > MAX_SKIP) anchor = await bisect(start, total() ?? 0, current)
     if (current !== token) return null
     const { from, to } = range()
     const rows = await fetchData<T[]>(

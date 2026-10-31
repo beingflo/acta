@@ -8,7 +8,7 @@ import ExpandButton from './ExpandButton'
 import { axisTickLabels, formatBucket, formatNumber, formatTimestamp, unitOf } from '../lib/format'
 import { clearReadings, claimReadingOrder, publishReadings } from '../lib/latest'
 import { BAR_FILL, fillFor, strokeFor } from '../lib/palette'
-import { bucketFor, timeSeriesSql, toAligned, type Series } from '../lib/query'
+import { bucketFor, METRIC_MIN_BUCKET_MS, timeSeriesSql, toAligned, type Series } from '../lib/query'
 import { fitRange, type YFit } from '../lib/scale'
 import { range, setCustomRange } from '../lib/range'
 import { autoRefresh } from '../lib/refresh'
@@ -532,7 +532,16 @@ export default function TimeSeriesTile(props: {
     const { from, to } = range()
     // A count bucket that saw no requests is zero, not missing. Bars therefore
     // get the complete bucket grid; a line just connects across a quiet spell.
-    const bucket = bucketFor(from, to, chartWidth, props.bars ? BAR_BUCKET_PX : 1)
+    const bucket = bucketFor(
+      from,
+      to,
+      chartWidth,
+      props.bars ? BAR_BUCKET_PX : 1,
+      // `/api/series` refuses anything under a second, so a wide metric tile
+      // over a short window asks for its coarsest accepted bucket instead of a
+      // 400.
+      props.metrics ? METRIC_MIN_BUCKET_MS : 0,
+    )
     if (props.bars) setBarMs(bucket.ms)
     const sql = props.query
       ? props.query(from, to)
