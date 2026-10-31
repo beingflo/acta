@@ -18,9 +18,10 @@ The built frontend (`ui/dist`) is served by the same process; unknown paths fall
 single-page app.
 
 The service also serves PMTiles map archives from `tiles/` (`ACTA_TILES_DIR`) at `/tiles/*`, with HTTP range support, a
-strong ETag and a short cache window — currently a world archive plus two extracts derived from the location fixes.
-See
-`design/003-visualization.md` for how the map uses them.
+strong ETag and a month-long cache window — currently a world archive plus two extracts derived from the location
+fixes. The archives are rebuilt by hand roughly twice a year, so a month in the browser's cache is cheap for the client
+and saves the most expensive transfers this service does; a rebuilt archive is noticed at the next revalidation, when
+its ETag no longer matches. `design/003-visualization.md` describes how the map uses them.
 
 ## The epaper panel
 

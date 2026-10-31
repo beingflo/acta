@@ -44,12 +44,21 @@ pub fn router(state: AppState, ui_dir: PathBuf, tiles_dir: PathBuf) -> Router {
     let body_limit = state.ingest_max_body_bytes;
 
     // PMTiles archives are pulled with HTTP Range requests. `ServeDir` supports
-    // ranges and sets a strong ETag from the file metadata; the PMTiles client
-    // reads that ETag to notice a replaced archive.
+    // ranges and sets a strong ETag from the file metadata; a replaced archive
+    // changes that ETag, which the PMTiles client uses to invalidate what it has
+    // read so far.
+    //
+    // The archives are rebuilt by hand about twice a year, so they are worth a
+    // month in the browser's HTTP cache: a tens-of-megabytes archive read in
+    // ranges is the most expensive thing this service serves, and it does not
+    // change between deploys. `must-revalidate` keeps the month a freshness
+    // window rather than an excuse to serve a stale archive forever: after it,
+    // the next range request revalidates, and a rebuilt archive fails the ETag
+    // check and is reloaded.
     let tiles = ServiceBuilder::new()
         .layer(SetResponseHeaderLayer::overriding(
             header::CACHE_CONTROL,
-            HeaderValue::from_static("public, max-age=300, must-revalidate"),
+            HeaderValue::from_static("public, max-age=2592000, must-revalidate"),
         ))
         .layer(SetResponseHeaderLayer::overriding(
             header::ACCESS_CONTROL_ALLOW_ORIGIN,
