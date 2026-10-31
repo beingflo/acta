@@ -4,6 +4,7 @@ import { fetchData } from '../lib/api'
 import { eventDetail } from '../lib/detail'
 import { latencyParts, tableTimeParts } from '../lib/format'
 import {
+  type RequestFilter,
   type RequestRow,
   type StoredEvent,
   eventDetailSql,
@@ -14,14 +15,26 @@ import PagedTable from './PagedTable'
 
 const Table = PagedTable<RequestRow>
 
-/** Access-log table: one row per request in the selected window. */
-export default function RequestTable(props: { source: string; title: string }) {
+/** Access-log table: one row per request in the selected window, narrowed by the
+ *  dashboard's filter row. */
+export default function RequestTable(props: {
+  source: string
+  title: string
+  /** What the rows are cut down to. Empty fields leave them whole. */
+  filter: RequestFilter
+}) {
   return (
     <Table
       title={props.title}
       variant="requests"
-      countSql={(from, to, cursorUs) => requestCountSql(props.source, from, to, cursorUs)}
-      pageSql={(query) => requestPageSql({ source: props.source, ...query })}
+      // A narrower list is a different list: re-count and re-page from its top.
+      reloadOn={() => props.filter}
+      countSql={(from, to, cursorUs) =>
+        requestCountSql(props.source, from, to, cursorUs, props.filter)
+      }
+      pageSql={(query) =>
+        requestPageSql({ source: props.source, ...query, filter: props.filter })
+      }
       head={
         <>
           <span class="col-time">Time</span>

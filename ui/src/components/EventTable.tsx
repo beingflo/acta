@@ -11,18 +11,20 @@ const ROW_HEIGHT = 44
 const Table = PagedTable<EventRow>
 
 /**
- * Every row that entered the system, whatever its source. The payload stays one
- * JSON column rather than a column per key: each source has its own shape, and
- * a wide event (the server stats) carries dozens of fields.
+ * Every row that entered the system, or one source's rows. The payload stays one
+ * JSON column rather than a column per key: each source has its own shape, and a
+ * wide event (the server stats) carries dozens of fields.
  */
-export default function EventTable(props: { title: string }) {
+export default function EventTable(props: { title: string; source?: string }) {
   return (
     <Table
       title={props.title}
       variant="events"
       rowHeight={ROW_HEIGHT}
-      countSql={eventCountSql}
-      pageSql={eventPageSql}
+      // A narrower list is a different list: re-count and re-page from its top.
+      reloadOn={() => props.source}
+      countSql={(from, to, cursorUs) => eventCountSql(from, to, cursorUs, props.source)}
+      pageSql={(query) => eventPageSql({ ...query, source: props.source })}
       head={
         <>
           <span class="col-time">Time</span>

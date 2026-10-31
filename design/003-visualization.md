@@ -114,10 +114,16 @@ The whole firehose: every row that enters the system, whatever its source. Above
 on disk, rows stored in all files, rows in the selected range with their per-minute rate, the last hour's rate, the
 age of the newest entry, and how many sources fed the range. The age is taken over the whole dataset, so it still
 reads correctly when the window is stepped back in time. File sizes come from the Parquet footers via
-`parquet_file_metadata`; the frontend finds the data directory as the one DuckDB is allowed to read. A full-width bar
-chart of incoming entries per bucket — all sources counted together — follows, so a stalled collector or a spurt
-shows up as a quiet or busy stretch. Below it a table fills the rest of the viewport with the individual rows in the
-same range, newest first: time, source, and the payload as one compact JSON column. The payload is not flattened into
+`parquet_file_metadata`; the frontend finds the data directory as the one DuckDB is allowed to read.
+
+A source filter sits between the strip and the chart: one dropdown listing the sources the window holds with their row
+counts, and both views below it are narrowed to the chosen one. It belongs to the dashboard rather than to the table, so
+a collector that has gone quiet can be watched on its own instead of being fished out of the firehose — and `source` is
+a plain column, so this read costs nothing even on a year, unlike Marending's facet reads, which decode the payload.
+
+A full-width bar chart of incoming entries per bucket follows — every source counted together, or the chosen one — so a
+stalled collector or a spurt shows up as a quiet or busy stretch. Below it a table fills the rest of the viewport with
+the rows the filter leaves, newest first: time, source, and the payload as one compact JSON column. The payload is not flattened into
 a column per key, because sources share no schema and a wide event (the server stats) would need dozens of columns for
 every other source to leave empty. The JSON wraps to two lines, with the full text on hover.
 
@@ -159,6 +165,22 @@ bucket that is half errors reads as half a red bar. Below it a table fills the r
 requests in the same range: time, method, URI, status, latency, referrer, user agent and, where the handler logged one,
 the error message. Rows newest first. A bucket that saw no requests is drawn as zero, so every bar is one bucket wide
 and the gaps in the chart are real quiet periods.
+
+A filter row sits between the stats strip and the chart, and both views below it are narrowed by it: dropdowns for
+method, status and path area, whose values — and counts — are the ones the selected window actually contains (read with
+the window and with each filter change, not on every poll), and a search box matching a substring of the URI, the user
+agent or the referrer. Path area is derived from the URI rather than read from the log: `route_class` only appears in
+events from 2026-10-30 on, so most of the history carries none, while bucketing the path works on all of it. The
+buckets are `content` (the pages, with or without a trailing slash), `asset` (`/_astro`, by extension), `feed` (`rss`,
+`sitemap`, `robots`), `api`, `probe` (the WordPress and dot-file dictionary crawlers walk — those names only at the root,
+so a note called `/notes/config-driven-design` stays a page, but a dot-segment is a probe at any depth) and `missing`
+(everything else, which is what pairs with `4xx` to mean "pages that do not exist"). A field's counts are taken under the *other* filters and not its own, so each number says what picking that
+value would leave, and picking one never strands the dropdown. All three come from one grouped pass over the window:
+reading a payload field is the expensive part of these queries, and one pass reads them all. It belongs to the dashboard
+rather than to either view, because the chart is the same log counted per bucket — narrowing the table alone would let
+the two disagree about what "the requests" are. Empty fields narrow nothing; the row shows what is narrowing once
+something is, and clears itself in one click. The stats strip above stays the window's totals: "all time", "last hour"
+and "newest request" are not statements a request filter can narrow.
 
 The table is virtualized and paged by timestamp, because a window can hold hundreds of thousands of requests: a
 `count(*)` sizes a spacer so the scrollbar covers the whole range, and pages are fetched as "the 500 rows at or below

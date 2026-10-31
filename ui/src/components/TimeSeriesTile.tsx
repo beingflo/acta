@@ -151,6 +151,12 @@ export default function TimeSeriesTile(props: {
    * only names the columns, its `expr` unused.
    */
   query?: (from: Date, to: Date) => string
+  /**
+   * Extra `AND` clauses narrowing which rows are counted, escaped by the caller.
+   * The Marending dashboard draws only the requests its table is filtered to, so
+   * the two views of the same log agree.
+   */
+  where?: string
 }) {
   // A metric tile draws one line per reading; a SQL tile as many as it was
   // given. Everything below reads `series()` rather than the prop.
@@ -551,6 +557,7 @@ export default function TimeSeriesTile(props: {
           bucket: bucket.sql,
           from,
           to,
+          where: props.where,
         })
 
     // uPlot draws the epoch when the scale is unset, so a tile that is still

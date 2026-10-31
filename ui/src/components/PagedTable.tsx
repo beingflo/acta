@@ -90,6 +90,9 @@ export default function PagedTable<T extends CursoredRow>(props: {
   /** One page of rows, newest first, continuing at `cursorUs` when the caller
    *  already knows where the page starts. */
   pageSql: (query: PageQuery) => string
+  /** A signal the caller changes when it narrows the rows: any change reloads
+   *  the table from the top, the way a new range does. */
+  reloadOn?: Accessor<unknown>
   head: JSX.Element
   /** The row's cells. Called once per row; read the accessor to stay live when
    *  a refresh replaces the page. */
@@ -388,6 +391,10 @@ export default function PagedTable<T extends CursoredRow>(props: {
    *  because it sizes the scrollbar, then whatever the window needs. */
   const reload = async () => {
     const current = ++token
+    // A new window, or a narrower filter, is a different list: start at its
+    // newest row rather than wherever the old one happened to be scrolled.
+    if (scroller) scroller.scrollTop = 0
+    setScrollTop(0)
     cache = new Map()
     anchors = [{ index: 0, cursorUs: null }]
     entries = new Map()
@@ -448,6 +455,7 @@ export default function PagedTable<T extends CursoredRow>(props: {
 
   createEffect(() => {
     range() // re-run when the selected window changes
+    props.reloadOn?.() // ...or when the caller narrows the rows
     void reload()
   })
 
@@ -501,6 +509,9 @@ export default function PagedTable<T extends CursoredRow>(props: {
       </Show>
       <div class={`table ${props.variant}`}>
         <div class="table-head">{props.head}</div>
+        <Show when={total() === 0}>
+          <div class="table-empty">No rows in this window</div>
+        </Show>
         <div
           class="table-scroll"
           ref={scroller}

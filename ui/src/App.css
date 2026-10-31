@@ -436,6 +436,13 @@ body.fullscreen-tile {
   height: 100%;
 }
 
+/* Marending and acta put a filter row between the stats and the chart, so their
+   tables sit one row lower than the filled layout allows for. */
+.marending.filled,
+.acta.filled {
+  grid-template-rows: auto auto auto minmax(220px, 1fr);
+}
+
 .tile.table {
   display: flex;
   flex-direction: column;
@@ -447,6 +454,83 @@ body.fullscreen-tile {
 .tile-count {
   font-weight: 400;
   color: #999;
+}
+
+/* The Marending filter row, on the dashboard between the stats strip and the
+   chart: dropdowns over the values the window holds, and a search over the two
+   long text columns. It narrows the chart and the table below it alike. Quiet
+   until used — a field that is narrowing something darkens, so what the views
+   are cut down by is visible without opening anything. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.filters select,
+.filters input {
+  min-width: 0;
+  padding: 4px 7px;
+  font-size: 12px;
+  color: #6e6e6e;
+  background-color: #fff;
+  border: 1px solid #eeeeee;
+  border-radius: 6px;
+  outline: none;
+}
+
+/* The native arrow is the one piece of system chrome this row cannot restyle,
+   and it is sized for a 16px control; a drawn chevron keeps the three fields
+   looking like the inputs beside them. */
+.filters select {
+  max-width: 16rem;
+  padding-right: 22px;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23999999' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-position: right 7px center;
+  background-repeat: no-repeat;
+  background-size: 9px 6px;
+}
+
+.filters select:hover,
+.filters input:hover {
+  border-color: #e2e2e2;
+}
+
+.filters select:focus,
+.filters input:focus {
+  border-color: #d0d0d0;
+  color: #1a1a1a;
+}
+
+.filters select.set,
+.filters input.set {
+  color: #1a1a1a;
+  background-color: #fafafa;
+  border-color: #d8d8d8;
+}
+
+.filters input::placeholder {
+  color: #a8a8a8;
+}
+
+/* Wide enough for a domain or a bot name, but not so wide that "clear" ends up
+   across the tile from the fields it clears. */
+.filters .filter-search {
+  flex: 0 1 22rem;
+}
+
+.filters .filter-clear {
+  font-size: 12px;
+  color: #6e6e6e;
+  text-decoration: underline;
+  text-decoration-color: #d8d8d8;
+  text-underline-offset: 2px;
+}
+
+.filters .filter-clear:hover {
+  color: #1a1a1a;
 }
 
 .table {
@@ -497,6 +581,14 @@ body.fullscreen-tile {
   font-size: 11px;
   color: #888;
   border-bottom: 1px solid #eeeeee;
+}
+
+/* Nothing in the window, or nothing left after a filter: said out loud, since an
+   empty table otherwise looks like one that has not loaded yet. */
+.table-empty {
+  padding: 14px 0;
+  font-size: 12px;
+  color: #999;
 }
 
 .table-scroll {

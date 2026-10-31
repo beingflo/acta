@@ -115,6 +115,9 @@ export function timeSeriesSql(options: {
   series: Series[]
   bucket: string
   from: Date
+  /** Extra `AND` clauses, escaped by the caller: what the tile is narrowed to
+   *  beyond its source — a subset of one source's rows, say. */
+  where?: string
   to: Date
 }): string {
   const aggregates = options.series.map((s, i) => `${s.expr} AS s${i}`).join(',\n         ')
@@ -143,7 +146,7 @@ FROM (
          ${columns}
   FROM events
   WHERE timestamp >= TIMESTAMPTZ '${options.from.toISOString()}'
-    AND timestamp <  TIMESTAMPTZ '${options.to.toISOString()}'${source}
+    AND timestamp <  TIMESTAMPTZ '${options.to.toISOString()}'${source}${options.where ?? ''}
   GROUP BY 1
 )`
 }
@@ -440,13 +443,38 @@ WHERE source = '${escape(source)}'
   AND timestamp <  TIMESTAMPTZ '${to.toISOString()}'`
 }
 
+/** A source's row count within the window: what the acta table's source filter
+ *  offers. `source` is a plain column, so this costs no payload decoding —
+ *  unlike the request facets, this read stays fast on years of data. */
+export type EventSourceFacet = { v: string; n: number }
+
+export function eventSourceFacetsSql(from: Date, to: Date): string {
+  return `SELECT coalesce(to_json(array_agg(struct_pack(v := source, n := n) ORDER BY n DESC)), '[]'::JSON)::VARCHAR
+FROM (
+  SELECT source, count(*) AS n
+  FROM events
+  WHERE ${eventWindow(from, to)}
+  GROUP BY 1
+)`
+}
+
+/** `AND source = …`, for the queries that may be narrowed to one source. */
+function sourceBound(source?: string): string {
+  return source === undefined ? '' : `\n    AND source = '${escape(source)}'`
+}
+
 /** Number of rows in the window, or in `[from, cursor]` when a cursor is given,
- *  across every source. */
-export function eventCountSql(from: Date, to: Date, cursorUs?: number): string {
+ *  across every source or within one. */
+export function eventCountSql(
+  from: Date,
+  to: Date,
+  cursorUs?: number,
+  source?: string,
+): string {
   const bound = cursorUs === undefined ? '' : `\n    AND ${upTo(cursorUs)}`
   return `SELECT to_json(struct_pack(n := count(*)))::VARCHAR
 FROM events
-WHERE ${eventWindow(from, to)}${bound}`
+WHERE ${eventWindow(from, to)}${sourceBound(source)}${bound}`
 }
 
 /** One page of the acta table: every row in the window, newest first, with its
@@ -460,6 +488,8 @@ export function eventPageSql(options: {
   /** Rows strictly newer than this, oldest first — the direction the overlay's
    *  upward walk asks for. Mutually exclusive with `cursorUs`. */
   newerThanUs?: number
+  /** Only this source's rows, when the table is filtered to one. */
+  source?: string
 }): string {
   const { from, to } = options
   const limit = Math.max(1, Math.floor(options.limit))
@@ -483,7 +513,7 @@ FROM (
          source,
          to_json(data)::VARCHAR                AS data
   FROM events
-  WHERE ${eventWindow(from, to)}${bound}
+  WHERE ${eventWindow(from, to)}${sourceBound(options.source)}${bound}
   ORDER BY timestamp ${order}
   LIMIT ${limit} OFFSET ${offset}
 )`
@@ -556,6 +586,131 @@ function newerThan(cursorUs: number): string {
   return `timestamp > CAST(make_timestamp(${Math.round(cursorUs)}) AS TIMESTAMPTZ)`
 }
 
+/** What a request table is narrowed by. Empty strings mean "not filtered", so
+ *  a cleared field needs no `undefined` handling anywhere. */
+export type RequestFilter = {
+  method: string
+  status: string
+  /** One of `PATH_AREA`'s buckets, not a stored field: see `pathAreaSql`. */
+  pathArea: string
+  /** Substring of the URI, the user agent or the referrer, case-insensitive. */
+  search: string
+}
+
+/** One selectable value of a filterable field, with how often it occurs. */
+export type RequestFacet = { f: string; v: string; n: number }
+
+/**
+ * The log's URIs bucketed into what the site actually serves.
+ *
+ * The log has thousands of distinct paths and no reliable field saying what a
+ * request was for — `route_class` only appears in events from 2026-10-30 on, so
+ * most of the history carries none. This classifies every row by path alone,
+ * which is what the traffic is really split by: the pages and files the site
+ * has, the feeds it publishes, and the two kinds of path it does not have —
+ * crawlers' dictionary of WordPress and dot-files, and everything else that came
+ * back missing. `missing` takes no view on the status: pairing it with `4xx` is
+ * how you ask for "pages that do not exist". The WordPress names only count at
+ * the root — a note called `/notes/config-driven-design` is a page — while a
+ * dot-segment is a probe at any depth, so `/notes/.git/config` is one too.
+ */
+function pathAreaSql(uri: string): string {
+  return `CASE
+    WHEN regexp_matches(${uri}, '^/(wp-|wp_|wordpress|blog|administrator|admin|backup|backups|config|vendor|xmlrpc)')
+      OR regexp_matches(${uri}, '(^|/)\\.[a-z]') THEN 'probe'
+    WHEN ${uri} LIKE '/_astro/%' OR regexp_matches(${uri}, '\\.(css|js|mjs|svg|png|jpe?g|webp|avif|ico|woff2?)$') THEN 'asset'
+    WHEN ${uri} LIKE '/api/%' THEN 'api'
+    WHEN regexp_matches(${uri}, '(rss|feed|sitemap|robots)') THEN 'feed'
+    WHEN ${uri} LIKE '/notes%' OR ${uri} LIKE '/projects%'
+      OR regexp_replace(${uri}, '/$', '') IN ('', '/about', '/feedback', '/launchd', '/uses')
+      THEN 'content'
+    ELSE 'missing'
+  END`
+}
+
+/** The free-text clause: a substring of the URI, the agent or the referrer,
+ *  lowercased on both sides. A substring and not a pattern — `contains` keeps
+ *  `%` and `_` literal, where `LIKE` would need them escaped. */
+function searchClause(filter: RequestFilter): string | null {
+  const needle = filter.search.trim().toLowerCase()
+  if (!needle) return null
+  const literal = escape(needle)
+  return `(contains(lower(coalesce(data.uri::VARCHAR, '')), '${literal}')
+        OR contains(lower(coalesce(data.user_agent::VARCHAR, '')), '${literal}')
+        OR contains(lower(coalesce(data.referrer::VARCHAR, '')), '${literal}'))`
+}
+
+/**
+ * The `AND`s a filter adds to every request query. Counting, paging and the
+ * bisection that finds an anchor all go through this, which is what keeps a
+ * narrowed table's row numbers pointing at the rows it shows.
+ */
+export function requestFilterSql(filter?: RequestFilter): string {
+  if (!filter) return ''
+  const clauses: string[] = []
+  if (filter.method) clauses.push(`data.method::VARCHAR = '${escape(filter.method)}'`)
+  if (filter.pathArea) {
+    clauses.push(`${pathAreaSql('data.uri::VARCHAR')} = '${escape(filter.pathArea)}'`)
+  }
+  const status = Number.parseInt(filter.status, 10)
+  if (filter.status && Number.isFinite(status)) {
+    clauses.push(`TRY_CAST(data.status AS INT) = ${status}`)
+  }
+  const search = searchClause(filter)
+  if (search) clauses.push(search)
+  return clauses.map((clause) => `\n    AND ${clause}`).join('')
+}
+
+/** The fields a dropdown offers, and the column the cube names each by. */
+const FACET_FIELDS = [
+  { facet: 'method', key: 'method', column: 'm' },
+  { facet: 'status', key: 'status', column: 's' },
+  { facet: 'path_area', key: 'pathArea', column: 'p' },
+] as const
+
+/**
+ * The values a filter may offer: the log's own vocabulary rather than a list in
+ * the source, so a method or a route class the site starts using shows up in the
+ * dropdown on the next read.
+ *
+ * Each field is counted under the *other* filters — a dropdown's own value must
+ * not narrow the list it is choosing from, or picking "POST" would leave "POST"
+ * as the only option and there would be no way back to the others. That is three
+ * counts over three different row sets, so they are taken from one grouped pass
+ * over the window and summed per field: reading the three fields is what costs
+ * (each one decodes the payload), and the cube decodes it once.
+ */
+export function requestFacetsSql(
+  source: string,
+  from: Date,
+  to: Date,
+  filter?: RequestFilter,
+): string {
+  const search = filter === undefined ? null : searchClause(filter)
+  const branches = FACET_FIELDS.map(({ facet, key, column }) => {
+    const conditions = FACET_FIELDS.filter(
+      (other) => other.key !== key && filter !== undefined && filter[other.key] !== '',
+    ).map((other) => `${other.column} = '${escape(filter![other.key])}'`)
+    conditions.push(`${column} IS NOT NULL`)
+    return `  SELECT '${facet}' AS f, ${column} AS v, sum(n) AS n
+  FROM cube WHERE ${conditions.join(' AND ')}
+  GROUP BY 2`
+  })
+  return `WITH cube AS (
+  SELECT data.method::VARCHAR                    AS m,
+         TRY_CAST(data.status AS INT)::VARCHAR   AS s,
+         ${pathAreaSql('data.uri::VARCHAR')}     AS p,
+         count(*) AS n
+  FROM events
+  WHERE ${requestWindow(source, from, to)}${search === null ? '' : `\n    AND ${search}`}
+  GROUP BY 1, 2, 3
+)
+SELECT coalesce(to_json(array_agg(struct_pack(f := f, v := v, n := n) ORDER BY f, n DESC)), '[]'::JSON)::VARCHAR
+FROM (
+${branches.join('\n  UNION ALL\n')}
+)`
+}
+
 /** Number of requests in the window, or in `[from, cursor]` when a cursor is
  *  given. Sizes the table's scroll spacer, and drives the bisection that finds
  *  an anchor at a given row. */
@@ -564,11 +719,12 @@ export function requestCountSql(
   from: Date,
   to: Date,
   cursorUs?: number,
+  filter?: RequestFilter,
 ): string {
   const bound = cursorUs === undefined ? '' : `\n    AND ${upTo(cursorUs)}`
   return `SELECT to_json(struct_pack(n := count(*)))::VARCHAR
 FROM events
-WHERE ${requestWindow(source, from, to)}${bound}`
+WHERE ${requestWindow(source, from, to)}${requestFilterSql(filter)}${bound}`
 }
 
 /** One page of the request table, newest first, continuing at `cursorUs` when
@@ -584,6 +740,8 @@ export function requestPageSql(options: {
   cursorUs?: number
   /** See `eventPageSql`: rows strictly newer than this, oldest first. */
   newerThanUs?: number
+  /** See `requestFilter`: the same narrowing the count uses. */
+  filter?: RequestFilter
 }): string {
   const { source, from, to } = options
   const limit = Math.max(1, Math.floor(options.limit))
@@ -611,7 +769,7 @@ FROM (
          data.user_agent::VARCHAR               AS agent,
          data.errors::VARCHAR                   AS error
   FROM events
-  WHERE ${requestWindow(source, from, to)}${bound}
+  WHERE ${requestWindow(source, from, to)}${requestFilterSql(options.filter)}${bound}
   ORDER BY timestamp ${order}
   LIMIT ${limit} OFFSET ${offset}
 )`
