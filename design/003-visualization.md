@@ -133,9 +133,11 @@ screen.
 ### eos
 
 The server itself, sampled every 10 s by `stats/collect.py` — a systemd timer on the host, see
-`design/004-service.md` — into the `eos-stats` source: CPU usage and load, memory, disk space, network rates, battery
-charge and temperature, and `podman stats` per container (once a minute, since that costs a process spawn rather than a
-file read). Linux exposes no CPU temperature on this hardware: the firmware holds the core sensors, but the Devicetree
+`design/004-service.md` — into the `eos-stats` source: CPU usage and load, memory, disk space and disk throughput,
+I/O, memory and CPU pressure (PSI, the share of time a task had to wait rather than the share of time the box was
+busy), network rates, battery charge and temperature, and — once a minute, since they cost a process spawn or are
+state rather than traffic — `podman stats` per container and the NVMe drive's own temperature. Linux exposes no CPU
+temperature on this hardware: the firmware holds the core sensors, but the Devicetree
 wires up only the NAND, the battery hotspot, the charge regulator and the WiFi module, so the board temperature chart
 is the hottest of those, a board-level proxy, and the battery reading is the one true temperature of a component. The
 half-width tiles are laid out in pairs of the same subject, so the two container charts, the two network directions

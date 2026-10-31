@@ -151,8 +151,9 @@ sensor credential as basic auth or as `Authorization: Bearer <sensor password>`,
 ### Host statistics
 
 The server's own metrics are collected outside the container, by `stats/collect.py` — installed as a systemd user
-timer by `mise run stats:install`. It reads /proc and /sys on the host, adds `podman stats` once a minute, and posts
-one row per 10 s sample to `POST /api/ingest` as `eos-stats`. Its sensor credential comes from the podman secret store:
+timer by `mise run stats:install`. It reads /proc and /sys on the host — gauges, the counters every rate is a difference
+of, and PSI — adds `podman stats` and the drive's health once a minute, and posts one row per 10 s sample to
+`POST /api/ingest` as `eos-stats`. Its sensor credential comes from the podman secret store:
 the collector reads it once per boot and caches it in the runtime directory, and a rejected credential makes it
 re-read and retry, so the install path never handles the password.
 

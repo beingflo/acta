@@ -3,13 +3,14 @@
 
 Installed on the server by `mise run stats:install` and run every 10 s by
 `acta-stats.timer`. Each run reads the host's gauges from /proc and /sys,
-derives CPU and network rates from the counters the previous run left in its
-state file, and posts the result to `POST /api/ingest` as the source
+derives CPU, network and disk rates from the counters the previous run left in
+its state file, and posts the result to `POST /api/ingest` as the source
 `eos-stats`.
 
 Reading /proc is nearly free; `podman stats` is not — it spawns podman and asks
-every container's cgroup — so containers ride along on every sixth sample, and
-the rows in between leave them out.
+every container's cgroup — so containers ride along on every sixth sample,
+together with the drive's health, which is state rather than traffic, and the
+rows in between leave both out.
 
 Standard library only, so it runs on a stock Asahi install with nothing to
 install first.
@@ -41,9 +42,15 @@ from pathlib import Path
 # boot and say nothing about the disk filling up.
 FILESYSTEMS = {"btrfs", "ext4", "xfs", "vfat", "f2fs"}
 
-# How often `podman stats` is worth its process spawn. The host gauges are plain
-# file reads and go out on every sample; containers do not.
-CONTAINER_INTERVAL_S = 60
+# Block device names worth a rate: the whole disks a laptop can have, never the
+# partitions and never the per-boot pseudo devices.
+DISK_PREFIXES = ("nvme", "sd", "mmcblk", "vd", "hd")
+
+# How often the half of the sample that is not a free gauge is worth its cost.
+# The host gauges — including the counters every rate is a difference of — are
+# plain file reads and go out on every sample; `podman stats` spawns a process,
+# and the drive's temperature and firmware say nothing over ten seconds.
+SLOW_INTERVAL_S = 60
 
 # podman stats formats memory as "12.4MB / 16GB", so both spellings of a byte
 # prefix have to be understood.
@@ -129,6 +136,32 @@ def net_totals() -> tuple[int, int]:
     return received, sent
 
 
+def pressure() -> dict | None:
+    """Stall share per resource, as the kernel's own 10 s average, in percent.
+
+    PSI is the one gauge here that says a task had to *wait* rather than that the
+    box was busy: a compaction or a backup that blocks readers shows up here
+    while the CPU chart stays flat. `some` is the share of time at least one task
+    stalled, `full` the share where nothing made progress at all. cpu has no
+    `full` line — a stalled CPU task is a stalled CPU — and the whole directory
+    is absent on a kernel built without PSI.
+
+    Only avg10 is kept: avg60 and avg300 are moving averages of this very series.
+    """
+    values: dict[str, float] = {}
+    for resource in ("cpu", "memory", "io"):
+        text = slurp(f"/proc/pressure/{resource}")
+        if text is None:
+            return None
+        for line in text.splitlines():
+            kind, _, rest = line.partition(" ")
+            fields = dict(field.split("=", 1) for field in rest.split() if "=" in field)
+            value = number(fields.get("avg10", ""))
+            if value is not None:
+                values[f"{resource.replace('memory', 'mem')}_{kind}"] = value
+    return values or None
+
+
 def memory() -> dict:
     """/proc/meminfo as the three figures a memory chart needs, in MiB."""
     info: dict[str, int] = {}
@@ -191,6 +224,55 @@ def disks() -> dict:
         "used_pct": root["used_pct"] if root else None,
         "boot_pct": boot["used_pct"] if boot else None,
     }
+
+
+def disk_counters() -> dict[str, tuple[int, ...]]:
+    """Per whole disk, the counters every disk rate is a difference of.
+
+    Partitions are skipped — their I/O is the disk's, counted twice — and so are
+    the devices the kernel synthesises per boot (loop, ram, zram, the optical
+    drive). /proc/diskstats counts sectors of 512 bytes whatever the drive's own
+    sector size, and io_ticks as milliseconds with at least one I/O in flight.
+    """
+    counters: dict[str, tuple[int, ...]] = {}
+    for line in (slurp("/proc/diskstats") or "").splitlines():
+        fields = line.split()
+        if len(fields) < 14:
+            continue
+        name = fields[2]
+        # A partition has no /sys/block entry of its own; the whole disk does.
+        if not name.startswith(DISK_PREFIXES) or not Path("/sys/block", name).exists():
+            continue
+        reads, sectors_read, writes, sectors_written, io_ms = (
+            int(fields[field]) for field in (3, 5, 7, 9, 12)
+        )
+        counters[name] = (reads, sectors_read, writes, sectors_written, io_ms)
+    return counters
+
+
+def disk_rates(counters: dict, previous: dict | None, elapsed: float) -> dict:
+    """Throughput, saturation and latency per disk over the interval.
+
+    `busy_pct` and `await_ms` answer different questions and neither follows from
+    the other: a saturated device is busy with a short await, a sick one is idle
+    with a long one.
+    """
+    rates = {}
+    for name, now in counters.items():
+        before = (previous or {}).get(name)
+        if before is None or elapsed <= 0:
+            continue
+        reads, sectors_read, writes, sectors_written, io_ms = (a - b for a, b in zip(now, before))
+        if min(reads, sectors_read, writes, sectors_written, io_ms) < 0:
+            continue  # the counters restart with the device
+        operations = reads + writes
+        rates[name] = {
+            "read_kbps": round(sectors_read * 512 / elapsed / 1024, 1),
+            "write_kbps": round(sectors_written * 512 / elapsed / 1024, 1),
+            "busy_pct": percent(io_ms, elapsed * 1000),
+            "await_ms": round(io_ms / operations, 2) if operations else 0.0,
+        }
+    return rates
 
 
 def battery() -> dict | None:
@@ -310,6 +392,37 @@ def load_averages() -> tuple[float, float, float]:
     return values[0], values[1], values[2]
 
 
+def nvme() -> dict | None:
+    """The drive's health, as far as sysfs exposes it without privileges.
+
+    `temp_c` is the drive's own sensor — the hottest of the ones it exposes, and
+    normally already inside `temp.board_c` too, since the kernel registers it as
+    an ordinary hwmon device; it is repeated here with the critical threshold the
+    drive reports, so the chart has the limit it is heading for. `state` leaves
+    `live` when the controller is reset or dead.
+
+    The counters that fill a SMART report — error_count, media_errors, percentage
+    used — live in a log page reached by a privileged ioctl, so no reading of
+    sysfs has them. Root on the host is what `nvme smart-log` is for.
+    """
+    controller = next(iter(sorted(Path("/sys/class/nvme").glob("nvme*"))), None)
+    if controller is None:
+        return None
+
+    def readings(pattern: str) -> list[float]:
+        found = [milli_celsius(slurp(str(path)) or "") for path in sorted(controller.glob(pattern))]
+        return [value for value in found if value is not None]
+
+    temperatures = readings("hwmon*/temp*_input")
+    critical = readings("hwmon*/temp1_crit")
+    return {
+        "temp_c": max(temperatures) if temperatures else None,
+        "crit_c": max(critical) if critical else None,
+        "state": (slurp(str(controller / "state")) or "").strip() or None,
+        "firmware": (slurp(str(controller / "firmware_rev")) or "").strip() or None,
+    }
+
+
 # --- one sample -------------------------------------------------------------
 
 
@@ -317,31 +430,31 @@ def sample(previous: dict | None) -> tuple[dict, dict]:
     """The payload for this run, and the counters the next run needs."""
     total, idle = cpu_totals()
     received, sent = net_totals()
+    disk_now = disk_counters()
     load1, load5, load15 = load_averages()
     hottest = temperature()
     uptime = (slurp("/proc/uptime") or "").split()
     now = time.time()
-    # The last container sample, so a row without containers still says how old
-    # the figures it is missing are.
+    # The last slow sample, which carried the containers and the drive's health.
     earlier = previous or {}
-    containers_at = earlier.get("containers_at")
-    due = containers_at is None or now - containers_at >= CONTAINER_INTERVAL_S
+    due = earlier.get("slow_at") is None or now - earlier["slow_at"] >= SLOW_INTERVAL_S
     # CPU time read last time, and when it was read: the baseline this run
     # subtracts from.
     cpu_ns = dict(earlier.get("containers_cpu") or {})
     cpu_ns_at = earlier.get("containers_cpu_at")
+    slow_at = earlier.get("slow_at")
 
     data = {
         "host": os.uname().nodename,
         "uptime_s": int(float(uptime[0])) if uptime else 0,
         "cores": os.cpu_count(),
         "cpu": {"usage_pct": None, "load1": load1, "load5": load5, "load15": load15},
+        "pressure": pressure(),
         "network": {"rx_kbps": None, "tx_kbps": None},
         "memory": memory(),
         "disk": disks(),
         "battery": battery(),
         "temp": {"board_c": hottest} if hottest is not None else None,
-        "containers_at": containers_at,
     }
     if due:
         stats = containers()
@@ -362,7 +475,8 @@ def sample(previous: dict | None) -> tuple[dict, dict]:
             cpu_ns_at = now
         data["containers"] = stats
         data["containers_total"] = container_totals(stats)
-        data["containers_at"] = containers_at = now
+        data["nvme"] = nvme()
+        slow_at = now
 
     # Rates need two readings. The first run after boot only reports gauges; the
     # rest average over however long it has been since the previous sample, so a
@@ -377,6 +491,7 @@ def sample(previous: dict | None) -> tuple[dict, dict]:
                 "rx_kbps": round((received - previous["rx"]) / elapsed / 1024, 1),
                 "tx_kbps": round((sent - previous["tx"]) / elapsed / 1024, 1),
             }
+            data["disk_io"] = disk_rates(disk_now, previous.get("disks"), elapsed)
 
     counters = {
         "at": now,
@@ -384,7 +499,8 @@ def sample(previous: dict | None) -> tuple[dict, dict]:
         "idle": idle,
         "rx": received,
         "tx": sent,
-        "containers_at": containers_at,
+        "disks": disk_now,
+        "slow_at": slow_at,
         "containers_cpu": cpu_ns,
         "containers_cpu_at": cpu_ns_at,
     }
