@@ -51,6 +51,13 @@ and an installed home-screen app on iOS cannot show its own sign-in form if a cr
 Everything that holds data (`/api/*`, `/tiles/*`) stays behind the middleware, and `/health` stays public for the deploy
 script and any probe.
 
+The shell is served with an explicit cache policy. Hashed assets under `/assets/` get a year as `immutable`, since their
+names change with their contents; everything else keeps its name across builds and is `no-cache`, so `index.html` (which
+names the asset hashes) and `sw.js` (which is how a new build arrives at all) are always revalidated. The service worker
+precaches the same files and normally answers before any of this matters, but the policy is what makes the fallback —
+a cold start, or a browser that has dropped the worker — a cheap revalidation instead of a full download. The page also
+paints a small inline "acta" mark from the HTML itself, so the gap before the bundle runs is never a blank page.
+
 **The dashboard signs in with a cookie, not with the browser's dialog.** iOS never offers to save basic credentials, and
 an installed web app gets its own storage container, so anything relying on the browser's prompt asks for the password
 on every cold launch. Instead the app posts the credential once to `/api/session` (setting `Authorization` itself, so no

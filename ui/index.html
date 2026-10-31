@@ -10,9 +10,35 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <title>Acta</title>
+    <!-- The first paint, before any of the app has loaded. Usually the service
+         worker hands over the shell in milliseconds, but a cold start can spend
+         a second or two getting there, and a blank white page reads as broken.
+         Inline and dependency-free on purpose: this has to paint from the HTML
+         alone. `index.tsx` removes it once the app has rendered. -->
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: #ffffff;
+        color: #1a1a1a;
+        font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+      }
+      #boot {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        font-size: 15px;
+        font-weight: 500;
+        letter-spacing: 0.14em;
+        color: #c9c9c9;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="boot">acta</div>
     <script type="module" src="/src/index.tsx"></script>
   </body>
 </html>

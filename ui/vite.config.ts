@@ -28,6 +28,10 @@ export default defineConfig({
     // The shell is a handful of hashed files: precache them so an installed app
     // opens instantly, and take an update as soon as one is deployed.
     registerType: 'autoUpdate',
+    // Registered from a line inside `index.html` rather than a separate
+    // `registerSW.js`: a file in `<head>` costs a round trip before the page can
+    // paint, and the snippet is two lines.
+    injectRegister: 'inline',
     includeAssets: ['icon.svg', 'apple-touch-icon.png', 'icon-maskable.svg'],
     manifest: {
       name: 'Acta',

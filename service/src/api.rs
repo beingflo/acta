@@ -40,8 +40,29 @@ pub struct AppState {
 
 pub fn router(state: AppState, ui_dir: PathBuf, tiles_dir: PathBuf) -> Router {
     let index = ui_dir.join("index.html");
-    let spa = ServeDir::new(ui_dir).fallback(ServeFile::new(index));
     let body_limit = state.ingest_max_body_bytes;
+
+    // The shell is versioned by the service worker, and a hashed asset never
+    // changes under its name: a year with `immutable` is safe, and it saves a
+    // revalidation per file whenever the worker is not the one answering. That
+    // path is the one that shows a blank page — a cold start fetching HTML and
+    // then a bundle, each a round trip.
+    let assets = ServiceBuilder::new()
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=31536000, immutable"),
+        ))
+        .service(ServeDir::new(ui_dir.join("assets")));
+
+    // Everything else in the shell keeps its name across builds and has to be
+    // revalidated: `index.html` names the asset hashes, `sw.js` is how a new
+    // build gets in at all. A `304` is cheap; a stale shell is a broken app.
+    let shell = ServiceBuilder::new()
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-cache"),
+        ))
+        .service(ServeDir::new(ui_dir).fallback(ServeFile::new(index)));
 
     // PMTiles archives are pulled with HTTP Range requests. `ServeDir` supports
     // ranges and sets a strong ETag from the file metadata; a replaced archive
@@ -101,7 +122,8 @@ pub fn router(state: AppState, ui_dir: PathBuf, tiles_dir: PathBuf) -> Router {
     Router::new()
         .route("/health", get(health))
         .merge(protected)
-        .fallback_service(spa)
+        .nest_service("/assets", assets)
+        .fallback_service(shell)
         .layer(CatchPanicLayer::new())
         .with_state(state)
 }

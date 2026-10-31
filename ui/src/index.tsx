@@ -11,3 +11,6 @@ canonicalizePath()
 const root = document.getElementById('root')
 
 render(() => <App />, root!)
+
+// The app's own DOM replaces the boot mark as the first paint.
+document.getElementById('boot')?.remove()
