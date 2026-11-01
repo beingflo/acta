@@ -303,6 +303,7 @@ async fn writer_loop(
 async fn write_buffer(data_dir: &Path, staging: &Path, opts: &WriteOptions, rows: Vec<Row>) {
     let count = rows.len();
     let row_group_size = opts.row_group_size;
+    let memory_limit = opts.memory_limit.clone();
     let mut rows = rows;
 
     for attempt in 1..=3u32 {
@@ -310,11 +311,13 @@ async fn write_buffer(data_dir: &Path, staging: &Path, opts: &WriteOptions, rows
         let staging = staging.to_path_buf();
         let target = data_dir.join(&name);
         let batch = rows;
+        let memory_limit = memory_limit.clone();
         let outcome = tokio::task::spawn_blocking(move || -> Result<(), (String, Vec<Row>)> {
-            let staged = match parquet::write_hot(&staging, &name, &batch, row_group_size) {
-                Ok(path) => path,
-                Err(err) => return Err((err, batch)),
-            };
+            let staged =
+                match parquet::write_hot(&staging, &name, &batch, row_group_size, &memory_limit) {
+                    Ok(path) => path,
+                    Err(err) => return Err((err, batch)),
+                };
             if let Err(err) = std::fs::rename(&staged, &target) {
                 return Err((format!("{}: {err}", target.display()), batch));
             }

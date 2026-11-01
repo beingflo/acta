@@ -218,9 +218,16 @@ async fn merge_and_install(ctx: &Context, name: &str, group: &[TierFile]) -> Res
     let staging = ctx.staging.clone();
     let name_owned = name.to_string();
     let row_group_size = ctx.opts.row_group_size;
+    let memory_limit = ctx.opts.memory_limit.clone();
     let merge_inputs = inputs.clone();
     let staged = tokio::task::spawn_blocking(move || {
-        parquet::merge(&staging, &name_owned, &merge_inputs, row_group_size)
+        parquet::merge(
+            &staging,
+            &name_owned,
+            &merge_inputs,
+            row_group_size,
+            &memory_limit,
+        )
     })
     .await
     .map_err(|e| format!("merge task failed: {e}"))??;
