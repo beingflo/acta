@@ -62,6 +62,20 @@ pub fn clear_staging(staging: &Path) {
     }
 }
 
+/// Where DuckDB spills sorts and hash tables that outgrow their memory limit.
+///
+/// DuckDB's default is `.tmp` next to the working directory, which the service
+/// cannot write: it runs unprivileged and its cwd belongs to root. The system
+/// temp dir is writable and is shared by the read pool and the compaction
+/// writer, which is safe because each instance only ever reclaims its own
+/// files.
+pub fn duckdb_temp_dir() -> Result<PathBuf, String> {
+    let dir = std::env::temp_dir().join("acta-duckdb");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("cannot create temp dir {}: {e}", dir.display()))?;
+    Ok(dir)
+}
+
 /// Parquet files the service owns. AppleDouble sidecars (`._name`) are macOS
 /// metadata left behind by tar extraction, not data, and reading one fails the
 /// view that spans the data directory.

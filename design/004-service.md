@@ -264,8 +264,9 @@ first failed.
 the data volume needs no chown, and no process inside is ever uid 0. `keep-id` is what makes that true — without it,
 uid 1000 would land on an unused subordinate id and the first flush would fail. `NoNewPrivileges=true` and
 `DropCapability=all` finish the job: the service binds 8080 and reads two directories, so it needs no capability at all.
-DuckDB's spill directory is set explicitly to `$TMPDIR/acta-duckdb` (see `db.rs`) for the same reason: the working
-directory is no longer writable by the service.
+DuckDB's spill directory is set explicitly to `$TMPDIR/acta-duckdb` in both the read pool (`db.rs`) and the Parquet
+writer (`parquet.rs`) for the same reason: the working directory is not writable by the service, and DuckDB's default
+spill location is `.tmp` inside it, so any sort that outgrows its memory limit — first a month merge — would fail.
 
 Credentials are podman secrets: `acta-auth-ui-user`/`-password`, `acta-auth-home-user`/`-password` (optional — omit both
 to run without the restricted viewer), `acta-auth-sensor-user`/`-password`,

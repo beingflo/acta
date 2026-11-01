@@ -98,8 +98,14 @@ pub fn write_seed(staging: &Path) -> Result<PathBuf, String> {
 fn writer() -> Result<Connection, String> {
     let config = Config::default().threads(2).map_err(|e| e.to_string())?;
     let conn = Connection::open_in_memory_with_flags(config).map_err(|e| e.to_string())?;
-    conn.execute_batch("SET memory_limit='512MB';")
-        .map_err(|e| e.to_string())?;
+    // A merge of a whole month is the one write that can outgrow the limit, and
+    // without this the spill would target DuckDB's default `.tmp` in the
+    // unwritable working directory and fail the whole pass.
+    let temp = quote(&crate::storage::duckdb_temp_dir()?);
+    conn.execute_batch(&format!(
+        "SET memory_limit='512MB';\nSET temp_directory={temp};"
+    ))
+    .map_err(|e| e.to_string())?;
     Ok(conn)
 }
 
@@ -129,4 +135,26 @@ fn publish(tmp: PathBuf, dest: PathBuf) -> Result<PathBuf, String> {
 
 fn quote(path: &Path) -> String {
     format!("'{}'", path.display().to_string().replace('\'', "''"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Month merges spill, and DuckDB's default spill directory is `.tmp` in the
+    /// working directory, which is not writable in the container: the pass then
+    /// failed with `Failed to create directory ".tmp": Permission denied`.
+    #[test]
+    fn writer_spills_into_the_shared_temp_dir() {
+        let conn = writer().expect("writer");
+        let dir: String = conn
+            .query_row("SELECT current_setting('temp_directory')", [], |row| {
+                row.get(0)
+            })
+            .expect("temp_directory");
+        assert_eq!(
+            Path::new(&dir),
+            crate::storage::duckdb_temp_dir().expect("temp dir")
+        );
+    }
 }

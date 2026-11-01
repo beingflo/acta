@@ -206,9 +206,7 @@ fn connect(options: &DbOptions) -> Result<Connection, String> {
     // Spilling must not land in the working directory: the container runs as an
     // unprivileged user and cannot write there. It goes to the system temp dir,
     // which therefore has to be allowed as well — external access is off below.
-    let temp_dir = std::env::temp_dir().join("acta-duckdb");
-    std::fs::create_dir_all(&temp_dir)
-        .map_err(|error| format!("cannot create temp dir {}: {error}", temp_dir.display()))?;
+    let temp_dir = crate::storage::duckdb_temp_dir()?;
     let temp = temp_dir.display().to_string().replace('\'', "''");
     let setup = format!(
         "SET allowed_directories = ['{dir}', '{temp}'];\n\
