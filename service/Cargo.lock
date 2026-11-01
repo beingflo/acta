@@ -15,6 +15,7 @@ dependencies = [
  "jiff",
  "object_store",
  "plotters",
+ "reqwest",
  "ring",
  "serde",
  "serde_json",

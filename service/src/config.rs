@@ -150,6 +150,15 @@ fn parse_backup() -> Result<BackupOptions, String> {
     let enabled = env_bool("ACTA_BACKUP", false)?;
     let bucket = env_str("ACTA_S3_BUCKET", "");
     let allow_http = env_bool("ACTA_S3_ALLOW_HTTP", false)?;
+    // The heartbeat URL is read by the backup loop, not carried in
+    // `BackupOptions`: it is a credential (whoever holds it can fake a ping),
+    // and that struct stays safe to log. Its shape is checked here so a typo is
+    // a startup error rather than a monitor that silently never hears anything.
+    if let Some(url) = env_option("ACTA_BACKUP_PING_URL")
+        && !(url.starts_with("https://") || url.starts_with("http://"))
+    {
+        return Err("ACTA_BACKUP_PING_URL must be a full http(s) URL".into());
+    }
     let endpoint = std::env::var("ACTA_S3_ENDPOINT")
         .ok()
         .map(|value| value.trim().to_string())
@@ -229,6 +238,14 @@ fn region_from_endpoint(endpoint: &str) -> Option<String> {
 
 fn env_str(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())
+}
+
+/// An optional string variable: unset, empty or blank is `None`.
+pub(crate) fn env_option(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn env_parse<T: std::str::FromStr>(key: &str, default: T) -> Result<T, String>

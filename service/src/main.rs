@@ -66,6 +66,9 @@ async fn serve(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(backup::run(
             db.data_dir().to_path_buf(),
             settings.backup.clone(),
+            // The backup reports each pass into the archive it writes, so it needs
+            // the same ingest handle the API uses.
+            ingest.handle(),
         ));
     }
 
@@ -77,6 +80,7 @@ async fn serve(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
         flush_ms = settings.write.flush_interval.as_millis(),
         auth = settings.auth.enabled(),
         backup = settings.backup.enabled,
+        heartbeat = backup::heartbeat_configured(),
         "acta service starting"
     );
 

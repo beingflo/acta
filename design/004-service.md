@@ -221,6 +221,21 @@ current hour. Hour files retire into day files at the end of their day, so the h
 granularity of the backup; day files of a month that has already folded into a `month-` file may never have been
 uploaded if the service was down for the whole month, in which case the month file covers those rows.
 
+Every pass reports itself. One row is written to the `acta-backup` source whether it succeeded or not, carrying
+`ok`, `uploaded`, `duration_ms`, the error message on failure, and `bucket_age_s` — the age of the newest object in
+the bucket measured *before* the pass uploaded anything, which is how a compaction that stopped producing files shows
+up even though every pass still succeeds. The dashboard reads "when did the backup last work" off these rows, so the
+answer lives in the archive rather than in a log line that scrolls away. A pass that fails is logged at `error!`
+rather than `warn!`, because a warning that repeats hourly for a month is read by nobody.
+
+A failed pass is retried by the next one, including a failure to build the S3 client: the loop keeps running so the
+failure is reported and retried instead of leaving a healthy-looking process with no backups for the rest of its life.
+Because the report row cannot outlive the process that writes it, `ACTA_BACKUP_PING_URL` — optional, and a podman
+secret like the S3 keys, since whoever holds the token could fake a ping — is fetched after every error-free pass.
+Nothing is sent for a failed pass, so a monitor on that URL alarms when the pings stop, which is the case no row can
+cover: the service being gone. The URL is pinged as configured, so the provider's grace window is what decides how
+long an outage goes unnoticed; three hours suits an hourly loop that also pings at startup.
+
 The bucket holds the file names verbatim under an optional `ACTA_S3_PREFIX`. Restore (`acta restore`, run as a
 one-shot container with the data volume mounted, see `mise run deploy:restore`) fetches the coarsest file the bucket
 carries for each span: an hour file is skipped when the bucket also holds its day file (or that day's month file), and
@@ -238,8 +253,8 @@ whose endpoint names its own region (`https://s3.<region>.backblazeb2.com`), so 
 all it takes. The scheme is required — the endpoint must be a full URL, and a bare host is a startup error rather
 than something guessed at — and the region is read off the host. `ACTA_S3_REGION` is only needed for a provider that
 does not encode it. The `AWS_*` variable names are simply what the S3 library reads. The resolved target is logged once at startup.
-Uploads run in their own task and never block ingestion or compaction; a failed pass
-only logs a warning and is retried on the next one.
+Uploads run in their own task and never block ingestion or compaction; a failed pass reports itself, is logged at
+`error!` and is retried on the next one.
 
 ## Deployment
 
@@ -275,8 +290,9 @@ spill location is `.tmp` inside it, so any sort that outgrows its memory limit �
 
 Credentials are podman secrets: `acta-auth-ui-user`/`-password`, `acta-auth-home-user`/`-password` (optional — omit both
 to run without the restricted viewer), `acta-auth-sensor-user`/`-password`,
-`acta-aws-key-id` and `acta-aws-secret`, installed with `mise run deploy:secrets`. Both halves of each auth pair are
-secrets, so a username never appears in the unit either. The values are committed as ciphertext in
+`acta-aws-key-id`, `acta-aws-secret` and `acta-backup-ping-url` (optional), installed with `mise run deploy:secrets`.
+Both halves of each auth pair are secrets, so a username never appears in the unit either. The values are committed as
+ciphertext in
 `.deploy.secrets.enc`, a sops dotenv file encrypted to the age recipient in `.sops.yaml`; the private key is the
 1Password item `SOPS age key - acta`, read into a variable by the two tasks that need it and never written to disk.
 `mise run deploy:edit-secrets` opens the ciphertext in `$EDITOR` and re-encrypts on save, so no decrypted copy is
@@ -291,8 +307,9 @@ time: the service assumes it owns the tree, including `.staging/` and `.trash/`.
 service setting the deploy can pass through, with its default. All of them are rendered into the quadlet as
 `Environment=` lines, so `systemctl --user cat acta` shows the effective configuration. The credentials
 `ACTA_AUTH_UI_USER`/`ACTA_AUTH_UI_PASSWORD`, `ACTA_AUTH_SENSOR_USER`/`ACTA_AUTH_SENSOR_PASSWORD`,
-`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are only decrypted by `mise run deploy:secrets`, which hands them to
-podman; `mise run deploy` never sees a secret value, it checks with `podman secret exists` that they were installed.
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `ACTA_BACKUP_PING_URL` are only decrypted by
+`mise run deploy:secrets`, which hands them to podman; `mise run deploy` never sees a secret value, it checks with
+`podman secret exists` that they were installed.
 `mise run deploy:secrets` also restarts `acta` when it is already installed, because a running container keeps the
 environment it started with; before the first deploy it only installs the secrets.
 
@@ -360,6 +377,7 @@ secrets, so the deploy always enables authentication.
 | `ACTA_S3_ENDPOINT` | unset | Endpoint of the S3-compatible provider, as a full `https://` URL; required for Backblaze B2. |
 | `ACTA_S3_PREFIX` | empty | Optional key prefix. |
 | `ACTA_S3_ALLOW_HTTP` | `off` | Allow a plain-HTTP endpoint (for example a local MinIO). |
+| `ACTA_BACKUP_PING_URL` | unset | Pinged after every error-free pass, for a dead-man's-switch monitor. A podman secret. |
 | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` | unset | Required when backup is on. |
 
 With `ACTA_BACKUP` off, none of the S3 variables are read and no upload is attempted.

@@ -7,40 +7,76 @@
 //! give hour granularity, then day and month files carry the same rows once they
 //! fold. Hot and recent files are skipped because they are superseded within the
 //! hour.
+//!
+//! Every pass also reports itself: one row in the `acta-backup` source says
+//! whether it succeeded, how much it uploaded and how old the bucket was when it
+//! started, so the archive answers "when did the backup last work" without
+//! asking the bucket. That row is what the dashboard reads; it cannot outlive the
+//! process, so an optional heartbeat URL is pinged after every error-free pass
+//! and a monitor alarms when the pings stop.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use chrono::{Timelike, Utc};
+use chrono::{DateTime, Timelike, Utc};
 use futures::StreamExt;
 use object_store::aws::{AmazonS3, AmazonS3Builder};
 use object_store::path::Path as ObjectPath;
 use object_store::{ObjectStore, PutPayload};
-use tracing::{info, warn};
+use tracing::{debug, error, info, warn};
 
-use crate::config::BackupOptions;
+use crate::config::{self, BackupOptions};
+use crate::ingest::{self, IngestHandle};
 use crate::storage;
 
-/// Run one pass at startup, then one per hour at `minute` past the hour.
-pub async fn run(data_dir: PathBuf, opts: BackupOptions) {
-    let store = match client(&opts) {
-        Ok(store) => store,
-        Err(err) => {
-            warn!(error = %err, "backup disabled: could not create the S3 client");
-            return;
-        }
-    };
+/// The source the backup's own reports are filed under: one row per pass.
+const SOURCE: &str = "acta-backup";
 
+/// Run one pass at startup, then one per hour at `minute` past the hour.
+///
+/// A pass that cannot build its client fails like any other and is retried next
+/// hour, rather than ending the loop: a backup that stopped for the life of the
+/// process would leave everything else looking healthy.
+pub async fn run(data_dir: PathBuf, opts: BackupOptions, ingest: IngestHandle) {
     loop {
-        if let Err(err) = run_once(store.as_ref(), &data_dir, &opts).await {
-            warn!(error = %err, "backup pass failed");
+        let started = Instant::now();
+        let result = pass(&data_dir, &opts).await;
+        let elapsed = started.elapsed();
+        match &result {
+            Ok(pass) => info!(
+                uploaded = pass.uploaded,
+                bucket_age_s = pass.bucket_age_s,
+                elapsed_ms = elapsed.as_millis() as u64,
+                "backup pass complete"
+            ),
+            Err(err) => error!(error = %err, "backup pass failed"),
+        }
+        report(&ingest, &result, elapsed).await;
+        if result.is_ok() {
+            heartbeat().await;
         }
         let wait = until_next_run(opts.minute);
         info!(seconds = wait.as_secs(), "next backup pass scheduled");
         tokio::time::sleep(wait).await;
     }
+}
+
+/// What a pass did beyond succeeding: the numbers its report row carries.
+struct Pass {
+    uploaded: usize,
+    /// Age of the newest object in the bucket, in seconds, measured before this
+    /// pass uploaded anything: it says how fresh the backup was when the pass
+    /// found it, which is the thing worth knowing. Trivially zero otherwise.
+    bucket_age_s: Option<i64>,
+}
+
+/// Build a client and run one pass. The client is built per pass — it costs no
+/// request — so a provider change takes effect without a restart.
+async fn pass(data_dir: &Path, opts: &BackupOptions) -> Result<Pass, String> {
+    let store = client(opts)?;
+    run_once(store.as_ref(), data_dir, opts).await
 }
 
 fn client(opts: &BackupOptions) -> Result<Arc<AmazonS3>, String> {
@@ -51,13 +87,18 @@ fn client(opts: &BackupOptions) -> Result<Arc<AmazonS3>, String> {
 
     // Logged once so a deploy can be checked against the provider's console: the
     // region is derived from a Backblaze endpoint when it is not set explicitly.
-    info!(
-        bucket = %opts.bucket,
-        region = %opts.region,
-        endpoint = opts.endpoint.as_deref().unwrap_or("aws"),
-        prefix = %opts.prefix,
-        "backup target"
-    );
+    // The client is built per pass, so the line is guarded rather than repeated
+    // every hour.
+    static ANNOUNCED: std::sync::Once = std::sync::Once::new();
+    ANNOUNCED.call_once(|| {
+        info!(
+            bucket = %opts.bucket,
+            region = %opts.region,
+            endpoint = opts.endpoint.as_deref().unwrap_or("aws"),
+            prefix = %opts.prefix,
+            "backup target"
+        );
+    });
 
     let mut builder = AmazonS3Builder::new()
         .with_bucket_name(&opts.bucket)
@@ -78,7 +119,21 @@ async fn run_once(
     store: &dyn ObjectStore,
     data_dir: &Path,
     opts: &BackupOptions,
-) -> Result<(), String> {
+) -> Result<Pass, String> {
+    // The bucket is listed on every pass, even one with nothing to upload: it is
+    // the only step that talks to the provider, so it is what a pass succeeds at
+    // when there is no new file to send.
+    let prefix = prefix(opts);
+    let mut existing: HashSet<ObjectPath> = HashSet::new();
+    let mut newest: Option<DateTime<Utc>> = None;
+    let mut listing = store.list(prefix.as_ref());
+    while let Some(item) = listing.next().await {
+        let meta = item.map_err(|e| format!("list: {e}"))?;
+        newest = Some(newest.map_or(meta.last_modified, |at| at.max(meta.last_modified)));
+        existing.insert(meta.location);
+    }
+    let bucket_age_s = newest.map(|at| (Utc::now() - at).num_seconds().max(0));
+
     // Back up closed buckets plus any archive file sitting at the top level (the
     // migration's `data.parquet`, before it is re-split into tiers). An `hour-`
     // file is only written once its hour has closed, so uploading it at the top
@@ -100,17 +155,6 @@ async fn run_once(
             wanted.push((name, entry.path()));
         }
     }
-    if wanted.is_empty() {
-        return Ok(());
-    }
-
-    let mut existing: HashSet<ObjectPath> = HashSet::new();
-    let prefix = prefix(opts);
-    let mut listing = store.list(prefix.as_ref());
-    while let Some(item) = listing.next().await {
-        let meta = item.map_err(|e| format!("list: {e}"))?;
-        existing.insert(meta.location);
-    }
 
     let mut uploaded = 0usize;
     for (name, path) in wanted {
@@ -128,8 +172,101 @@ async fn run_once(
         uploaded += 1;
         info!(key = %key, "uploaded");
     }
-    info!(uploaded, "backup pass complete");
-    Ok(())
+    Ok(Pass {
+        uploaded,
+        bucket_age_s,
+    })
+}
+
+/// Record the pass in the archive.
+///
+/// A row per hour is the cheapest way to make the backup's own history
+/// queryable: the dashboard reads the newest success off it, and a failure keeps
+/// its message next to the timestamp that says when it happened. Rows are small
+/// and land in a hot file like any other, so they are compacted and backed up
+/// with everything else.
+async fn report(ingest: &IngestHandle, result: &Result<Pass, String>, elapsed: Duration) {
+    let duration_ms = elapsed.as_millis() as u64;
+    let data = match result {
+        Ok(pass) => serde_json::json!({
+            "ok": true,
+            "uploaded": pass.uploaded,
+            "bucket_age_s": pass.bucket_age_s,
+            "duration_ms": duration_ms,
+        }),
+        Err(err) => serde_json::json!({
+            "ok": false,
+            "error": shorten(err),
+            "duration_ms": duration_ms,
+        }),
+    };
+    let item = ingest::IngestItem {
+        source: SOURCE.to_string(),
+        timestamp: None,
+        data,
+    };
+    let row = match ingest::item_to_row(item, ingest::now_us()) {
+        Ok(row) => row,
+        Err(err) => {
+            warn!(error = %err, "backup: could not build the report row");
+            return;
+        }
+    };
+    // The backlog is unbounded from this side, and a wedged writer must not take
+    // the backup down with it: the row is worth missing, the pass is not.
+    let submitted = tokio::time::timeout(Duration::from_secs(30), ingest.submit(vec![row])).await;
+    match submitted {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => warn!(error = %err, "backup: could not record the pass"),
+        Err(_) => warn!("backup: the ingest buffer did not take the report row"),
+    }
+}
+
+/// One line, not a log: an error is a card's detail row and a value in the
+/// archive, so keep the head of it and say how much was dropped.
+fn shorten(err: &str) -> String {
+    const MAX: usize = 200;
+    let mut head: String = err.chars().take(MAX).collect();
+    if err.chars().count() > MAX {
+        head.push('…');
+    }
+    head
+}
+
+/// Ping the dead-man's switch after an error-free pass, if one is configured.
+///
+/// The report row proves the backup to whoever reads the dashboard; this proves
+/// it to something that notices when the whole process is gone, which no row can
+/// do. Nothing is sent for a failed pass: the monitor's grace window is the
+/// alarm, and the row says what went wrong. The URL is the credential — anyone
+/// holding it can fake a heartbeat — so it is read from the environment where it
+/// is used, never from `BackupOptions`, which is logged at startup, and the error
+/// is logged `without_url` because it would otherwise print it.
+async fn heartbeat() {
+    let Some(url) = config::env_option("ACTA_BACKUP_PING_URL") else {
+        return;
+    };
+    let response = reqwest::Client::new()
+        .get(&url)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await;
+    match response {
+        Ok(response) if response.status().is_success() => {
+            debug!(status = response.status().as_u16(), "backup heartbeat sent");
+        }
+        Ok(response) => warn!(
+            status = response.status().as_u16(),
+            "backup heartbeat was refused"
+        ),
+        Err(err) => warn!(error = %err.without_url(), "backup heartbeat failed"),
+    }
+}
+
+/// Whether a heartbeat URL is configured, for the startup log: the URL is a
+/// secret, so only its presence is reported.
+pub fn heartbeat_configured() -> bool {
+    config::env_option("ACTA_BACKUP_PING_URL").is_some()
 }
 
 /// Download the backed-up objects into `data_dir`, coarsest tier first. Existing
@@ -250,7 +387,7 @@ fn until_next_run(minute: u32) -> Duration {
 mod tests {
     use std::collections::HashSet;
 
-    use super::covered;
+    use super::{covered, shorten};
     use crate::storage;
 
     fn set(names: &[&str]) -> HashSet<String> {
@@ -278,5 +415,25 @@ mod tests {
 
         // Files outside the tiers (`data.parquet`) are always fetched.
         assert!(!covered("data.parquet", &set(&[&month_name])));
+    }
+
+    #[test]
+    fn a_reported_error_is_one_short_line() {
+        assert_eq!(
+            shorten("put hour-1.parquet: 403 AccessDenied"),
+            "put hour-1.parquet: 403 AccessDenied"
+        );
+
+        // Long messages are cut, and the ellipsis says so rather than letting the
+        // row look like the whole error.
+        let long = "x".repeat(500);
+        let cut = shorten(&long);
+        assert_eq!(cut.chars().count(), 201);
+        assert!(cut.ends_with('…'));
+
+        // Counted in characters, not bytes: an accented provider message must
+        // not panic on a slice boundary.
+        let accented = "é".repeat(300);
+        assert_eq!(shorten(&accented).chars().count(), 201);
     }
 }

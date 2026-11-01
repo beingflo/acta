@@ -112,9 +112,12 @@ The same readings are drawn onto the epaper panel in the living room by the serv
 
 The whole firehose: every row that enters the system, whatever its source. Above the chart a strip of scalars: data
 on disk, rows stored in all files, rows in the selected range with their per-minute rate, the last hour's rate, the
-age of the newest entry, and how many sources fed the range. The age is taken over the whole dataset, so it still
-reads correctly when the window is stepped back in time. File sizes come from the Parquet footers via
-`parquet_file_metadata`; the frontend finds the data directory as the one DuckDB is allowed to read.
+age of the newest entry, how many sources fed the range, and the age of the last successful backup. The age is taken
+over the whole dataset, so it still reads correctly when the window is stepped back in time. File sizes come from the
+Parquet footers via `parquet_file_metadata`; the frontend finds the data directory as the one DuckDB is allowed to
+read. The backup card reads the `acta-backup` rows the backup writes about its own passes — it disappears while no
+pass has ever been recorded, so a box without a backup shows no red, and it turns red once the last success is older
+than a day, with the newest failure's message as its second line.
 
 A source filter sits between the strip and the chart: one dropdown listing the sources the window holds with their row
 counts, and both views below it are narrowed to the chosen one. It belongs to the dashboard rather than to the table, so

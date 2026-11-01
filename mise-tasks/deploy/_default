@@ -40,6 +40,13 @@ if [[ -n "$s3_bucket" ]]; then
     require_secret acta-aws-key-id
     require_secret acta-aws-secret
 fi
+# The backup heartbeat is optional too: with no URL the backup still reports into
+# the archive, only an outside monitor goes unwatched.
+if ssh "$host" 'podman secret exists acta-backup-ping-url' >/dev/null 2>&1; then
+    backup_ping=on
+else
+    backup_ping=off
+fi
 
 note "building ${image}"
 podman build -t "$image" .
@@ -108,6 +115,7 @@ note "installing acta.container (${tag})"
 sed_args=(-e "s|__TAG__|${tag}|g")
 [[ -n "$s3_bucket" ]] || sed_args+=(-e '/type=env,target=AWS_/d')
 [[ "$home_auth" == on ]] || sed_args+=(-e '/target=ACTA_AUTH_HOME_/d')
+[[ "$backup_ping" == on ]] || sed_args+=(-e '/target=ACTA_BACKUP_PING_URL/d')
 sed "${sed_args[@]}" acta.container \
   | CONFIG="$config" awk '{ if ($0 == "__CONFIG__") print ENVIRON["CONFIG"]; else print }' \
   | ssh "$host" 'mkdir -p "$HOME/.config/containers/systemd" && cat > "$HOME/.config/containers/systemd/acta.container"'

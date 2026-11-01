@@ -300,6 +300,37 @@ export type FileStats = {
   files: number
 }
 
+/** The backup's own report: one row per S3 pass, in the `acta-backup` source. */
+export type BackupStats = {
+  /** Passes ever recorded. Zero means the backup is off, not that it is failing. */
+  passes: number
+  /** Epoch seconds of the newest error-free pass; null when none ever finished. */
+  last_success: number | null
+  /** Whether the newest pass succeeded, and the latest failure's message. */
+  newest_ok: boolean | null
+  last_error: string | null
+  /** Files the newest pass uploaded; 0 is the normal case for an idle hour. */
+  last_uploaded: number | null
+}
+
+/**
+ * The newest successful backup pass, off the rows the backup writes about
+ * itself. `timestamp` is when the pass finished, so the age of that row is the
+ * age of the backup without asking the bucket — the archive is where the
+ * answer outlives the process that produced it.
+ */
+export function backupSql(): string {
+  return `SELECT to_json(struct_pack(
+           passes := count(*),
+           last_success := CAST(epoch(CAST((max(timestamp) FILTER (WHERE TRY_CAST(data.ok AS BOOLEAN))) AS TIMESTAMP)) AS BIGINT),
+           newest_ok := arg_max(TRY_CAST(data.ok AS BOOLEAN), timestamp),
+           last_error := arg_max(TRY_CAST(data.error AS VARCHAR), timestamp),
+           last_uploaded := arg_max(TRY_CAST(data.uploaded AS BIGINT), timestamp)
+         ))::VARCHAR
+FROM events
+WHERE source = 'acta-backup'`
+}
+
 /**
  * The Parquet files on disk, summed from their footers. `parquet_file_metadata`
  * needs a path and the frontend does not know the data directory, so it is read

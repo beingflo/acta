@@ -9,6 +9,9 @@ export type Stat = {
   detail?: string
   /** Full text on hover, for what the card itself cannot show. */
   title?: string
+  /** Paint the card as a problem rather than a reading, for a value that is
+   *  only shown because it must not be missed. */
+  alert?: boolean
 }
 
 /**
@@ -21,7 +24,11 @@ export default function StatsStrip(props: { stats: Stat[] }) {
     <div class="latest-strip">
       <For each={props.stats}>
         {(stat) => (
-          <div class="latest-card" title={stat.title}>
+          <div
+            class="latest-card"
+            classList={{ 'latest-card-alert': stat.alert }}
+            title={stat.title}
+          >
             <div class="latest-card-title">{stat.label}</div>
             <div class="latest-card-value">
               {stat.value}

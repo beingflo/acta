@@ -371,6 +371,22 @@ body.fullscreen-tile {
   text-overflow: ellipsis;
 }
 
+/* A card whose number is a problem rather than a reading. The strip is all
+   white on purpose, so the one red card in it is unmissable. */
+.latest-card-alert {
+  background: #fdf3f2;
+  border-color: #e6bdb6;
+}
+
+.latest-card-alert .latest-card-title,
+.latest-card-alert .latest-card-value {
+  color: #a33;
+}
+
+.latest-card-alert .latest-card-unit {
+  color: #b5837c;
+}
+
 /* Cursor tooltip. It is a child of uPlot's `.u-over`, positioned with a
    transform from the crosshair; z-index must beat uPlot's own cursor lines
    and selection overlay, which sit at 100. */

@@ -2,26 +2,37 @@ import { createEffect, createMemo, createSignal, onCleanup, onMount } from 'soli
 
 import { fetchData } from '../lib/api'
 import { byteParts, formatAge, formatCompact, formatNumber } from '../lib/format'
-import { type FileStats, filesSql, type Overview, overviewSql } from '../lib/query'
+import {
+  type BackupStats,
+  backupSql,
+  type FileStats,
+  filesSql,
+  type Overview,
+  overviewSql,
+} from '../lib/query'
 import { range } from '../lib/range'
 import { autoRefresh } from '../lib/refresh'
 import StatsStrip, { type Stat } from './StatsStrip'
 
+/** A backup older than a day no longer describes the system that is running. */
+const BACKUP_STALE_S = 86_400
+
 /**
  * Scalars above the acta dashboard: how much is stored, how quickly it is
- * arriving, and whether it is still arriving at all. Two queries, because the
- * file sizes come from the Parquet footers and must not take the event totals
- * down with them if the data directory cannot be found.
+ * arriving, and whether it is still arriving at all. Three queries, because the
+ * file sizes come from the Parquet footers and the backup age from the backup's
+ * own rows, and neither should take the event totals down with it.
  */
 export default function ActaStats() {
   const [overview, setOverview] = createSignal<Overview | null>(null)
   const [files, setFiles] = createSignal<FileStats | null>(null)
+  const [backup, setBackup] = createSignal<BackupStats | null>(null)
   let requestId = 0
 
   const load = async () => {
     const request = ++requestId
     const { from, to } = range()
-    const [nextOverview, nextFiles] = await Promise.all([
+    const [nextOverview, nextFiles, nextBackup] = await Promise.all([
       fetchData<Overview>(overviewSql(from, to)).catch((error) => {
         console.warn('overview stats query failed', error)
         return null
@@ -30,10 +41,15 @@ export default function ActaStats() {
         console.warn('file stats query failed', error)
         return null
       }),
+      fetchData<BackupStats>(backupSql()).catch((error) => {
+        console.warn('backup stats query failed', error)
+        return null
+      }),
     ])
     if (request !== requestId) return
     if (nextOverview) setOverview(nextOverview)
     if (nextFiles) setFiles(nextFiles)
+    if (nextBackup) setBackup(nextBackup)
   }
 
   createEffect(() => {
@@ -64,6 +80,29 @@ export default function ActaStats() {
     const hourMinutes = Math.min(spanMinutes, 60)
     const size = disk ? byteParts(disk.bytes) : null
     const newestAge = events?.newest == null ? null : Date.now() / 1000 - events.newest
+
+    // The backup card only appears once a pass has been recorded. Before that
+    // the backup may simply be off, and a red "never" on a box that does not
+    // back up would be noise; a backup that is on but has never succeeded does
+    // report, so it cannot hide here.
+    const lastBackup = backup()
+    const backupStats: Stat[] = []
+    if (lastBackup && lastBackup.passes > 0) {
+      const age = lastBackup.last_success == null
+        ? null
+        : Date.now() / 1000 - lastBackup.last_success
+      const failed = lastBackup.newest_ok === false
+      backupStats.push({
+        label: 'Last backup',
+        value: age == null ? 'never' : formatAge(age),
+        unit: age == null ? undefined : 'ago',
+        detail: failed
+          ? `failed: ${lastBackup.last_error ?? 'unknown error'}`
+          : `${lastBackup.last_uploaded ?? 0} uploaded`,
+        title: failed ? (lastBackup.last_error ?? undefined) : 'hourly S3 pass',
+        alert: age == null || age > BACKUP_STALE_S,
+      })
+    }
 
     return [
       {
@@ -103,6 +142,7 @@ export default function ActaStats() {
         value: events ? String(events.sources) : '—',
         title: events?.source_names.slice().sort().join(', '),
       },
+      ...backupStats,
     ]
   })
 
