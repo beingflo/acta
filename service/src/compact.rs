@@ -215,6 +215,20 @@ async fn compact_months(ctx: &Context) -> Result<(), String> {
 
 async fn merge_and_install(ctx: &Context, name: &str, group: &[TierFile]) -> Result<(), String> {
     let inputs: Vec<PathBuf> = group.iter().map(|f| f.path.clone()).collect();
+    // Logged before the merge, so a pass that runs out of memory still shows how
+    // much input it choked on. `input_mb` is the compressed size on disk; the
+    // writer holds several times that while it sorts and rewrites it.
+    let input_bytes: u64 = inputs
+        .iter()
+        .filter_map(|p| std::fs::metadata(p).ok())
+        .map(|m| m.len())
+        .sum();
+    tracing::info!(
+        bucket = name,
+        files = inputs.len(),
+        input_mb = input_bytes / (1024 * 1024),
+        "compacting tier"
+    );
     let staging = ctx.staging.clone();
     let name_owned = name.to_string();
     let row_group_size = ctx.opts.row_group_size;

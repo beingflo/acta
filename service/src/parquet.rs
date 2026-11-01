@@ -98,7 +98,7 @@ pub fn write_seed(staging: &Path) -> Result<PathBuf, String> {
 }
 
 /// Memory cap used before the service settings are available (the seed file).
-const DEFAULT_MEMORY_LIMIT: &str = "1GB";
+const DEFAULT_MEMORY_LIMIT: &str = "2GB";
 
 fn writer(memory_limit: &str) -> Result<Connection, String> {
     let config = Config::default().threads(2).map_err(|e| e.to_string())?;
@@ -165,95 +165,5 @@ mod tests {
         );
         // DuckDB reports the limit in MiB, so 256MB prints as 244.1 MiB.
         assert_eq!(setting("memory_limit"), "244.1 MiB");
-    }
-}
-
-#[cfg(test)]
-mod probe {
-    use super::*;
-    use duckdb::Config;
-    use std::path::PathBuf;
-
-    fn c(mem: &str, threads: i64) -> Connection {
-        let cfg = Config::default().threads(threads).expect("threads");
-        let conn = Connection::open_in_memory_with_flags(cfg).expect("open");
-        let temp = quote(&crate::storage::duckdb_temp_dir().expect("temp"));
-        conn.execute_batch(&format!(
-            "SET memory_limit='{mem}';\nSET temp_directory={temp};\nSET preserve_insertion_order=false;"
-        ))
-        .expect("setup");
-        conn
-    }
-
-    fn month() -> Vec<PathBuf> {
-        std::fs::read_dir("../data")
-            .expect("read")
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.to_string_lossy().contains("/day-2026-10-"))
-            .collect()
-    }
-
-    fn one<T: duckdb::types::FromSql>(conn: &Connection, sql: &str) -> T {
-        conn.query_row(sql, [], |row| row.get(0)).expect(sql)
-    }
-
-    #[test]
-    fn why_so_big() {
-        let list = month().iter().map(|p| quote(p)).collect::<Vec<_>>().join(", ");
-        let conn = c("2GB", 2);
-        let rows: i64 = one(&conn, &format!("SELECT count(*) FROM read_parquet([{list}])"));
-        let on_disk: i64 = month()
-            .iter()
-            .map(|p| std::fs::metadata(p).map(|m| m.len() as i64).unwrap_or(0))
-            .sum();
-        let text: i64 = one(&conn, &format!(
-            "SELECT sum(length(CAST(data AS VARCHAR))) FROM read_parquet([{list}])"));
-        let uncompressed: i64 = one(&conn, &format!(
-            "SELECT sum(total_uncompressed_size) FROM parquet_metadata('{}')",
-            month()[0].display()));
-        let compressed: i64 = one(&conn, &format!(
-            "SELECT sum(total_compressed_size) FROM parquet_metadata('{}')",
-            month()[0].display()));
-        println!("rows {rows}, parquet on disk {on_disk} B, json text {text} B ({:.0} B/row)", text as f64 / rows as f64);
-        println!("one day: compressed {compressed} B, uncompressed {uncompressed} B ({:.0} B/row)", uncompressed as f64 / 13314.0);
-        println!("one day, in-memory table: {} B", {
-            conn.execute_batch(&format!("CREATE TABLE t AS SELECT * FROM read_parquet('{}')", month()[0].display())).expect("ctas");
-            let used: i64 = one(&conn, "SELECT sum(memory_usage_bytes) FROM duckdb_memory()");
-            conn.execute_batch("DROP TABLE t").expect("drop");
-            used
-        });
-        println!("month, in-memory table: {} B", {
-            conn.execute_batch(&format!("CREATE TABLE t AS SELECT * FROM read_parquet([{list}])")).expect("ctas");
-            let used: i64 = one(&conn, "SELECT sum(memory_usage_bytes) FROM duckdb_memory()");
-            conn.execute_batch("DROP TABLE t").expect("drop");
-            used
-        });
-    }
-
-    fn copy_at(label: &str, mem: &str, rows_per_group: usize) {
-        let list = month().iter().map(|p| quote(p)).collect::<Vec<_>>().join(", ");
-        let staging = std::env::temp_dir().join("acta-probe");
-        std::fs::create_dir_all(&staging).expect("mkdir");
-        let sql = format!(
-            "COPY (SELECT timestamp, source, data FROM read_parquet([{list}], union_by_name=true) \
-             ORDER BY source, timestamp) TO {} (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE {rows_per_group})",
-            quote(&staging.join("p.tmp"))
-        );
-        let conn = c(mem, 2);
-        let start = std::time::Instant::now();
-        match conn.execute_batch(&sql) {
-            Ok(()) => println!("{label}: ok in {:?}", start.elapsed()),
-            Err(e) => println!("{label}: FAILED: {}", e.to_string().lines().next().unwrap_or("")),
-        }
-    }
-
-    #[test]
-    fn row_group_buffering() {
-        copy_at("rgs 250000 @ 256MB", "256MB", 250_000);
-        copy_at("rgs 25000 @ 256MB", "256MB", 25_000);
-        copy_at("rgs 2500 @ 256MB", "256MB", 2_500);
-        copy_at("rgs 250 @ 256MB", "256MB", 250);
-        copy_at("rgs 25 @ 64MB", "64MB", 25);
     }
 }

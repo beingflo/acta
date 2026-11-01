@@ -81,7 +81,7 @@ impl Settings {
             )?),
             compaction_grace: Duration::from_millis(env_parse("ACTA_COMPACTION_GRACE_MS", 30_000)?),
             row_group_size: env_parse("ACTA_ROW_GROUP_SIZE", 250_000)?,
-            memory_limit: env_str("ACTA_WRITE_MEMORY_LIMIT", "1GB"),
+            memory_limit: env_str("ACTA_WRITE_MEMORY_LIMIT", "2GB"),
             trash_retention: Duration::from_millis(env_parse(
                 "ACTA_TRASH_RETENTION_MS",
                 86_400_000,

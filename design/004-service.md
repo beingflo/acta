@@ -198,7 +198,7 @@ the tier file and its inputs and discards the inputs.
 `.trash/` is swept on its own slower cadence (ten minutes by default) rather than every compaction pass, since files
 are only removed once they age past the retention window.
 
-The write path (flushes and merges) has its own DuckDB memory cap, `ACTA_WRITE_MEMORY_LIMIT` (1GB by default, versus
+The write path (flushes and merges) has its own DuckDB memory cap, `ACTA_WRITE_MEMORY_LIMIT` (2GB by default, versus
 `ACTA_MEMORY_LIMIT` for the read pool). A month merge is the largest write there is, so that cap is what has to hold
 the merge's sort and Parquet buffers; when it is too low the pass fails with an out-of-memory error and retries every
 minute.

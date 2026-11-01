@@ -49,7 +49,7 @@ RestartSec=5
 # The service flushes the ingest buffer on SIGTERM; give it more than its own
 # 15 s shutdown timeout.
 TimeoutStopSec=30
-MemoryMax=3G
+MemoryMax=4G
 
 [Install]
 WantedBy=default.target
