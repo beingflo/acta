@@ -140,18 +140,20 @@ state rather than traffic — `podman stats` per container and the NVMe drive's 
 temperature on this hardware: the firmware holds the core sensors, but the Devicetree
 wires up only the NAND, the battery hotspot, the charge regulator and the WiFi module, so the board temperature chart
 is the hottest of those, a board-level proxy, and the battery reading is the one true temperature of a component. The
-half-width tiles are laid out in pairs of the same subject, so the two container charts, the two network directions
-and the two temperature charts each sit side by side.
+half-width tiles are laid out in pairs of the same subject, so the two pressure charts, the two container charts, the
+two disk-activity charts, the two network directions and the two temperature charts each sit side by side.
 
-The charts show the gauges worth a line over time: CPU, board temperature, memory, load, the filesystem behind `/`,
-container CPU and memory, network in and out, battery charge and temperature. Above them a strip of scalars: how long
-the box has been up, the age of its newest sample, and the window's CPU, memory and board temperature — each as the
-average with its peak beside it, since an average says what the box did and the peak says how far it went — then the
-disk, battery and container figures of the newest sample, which are state rather than traffic. A gauge that only some
-samples carry (containers, every sixth) reads its last known value instead of dropping out of the window, and the age
-of the newest sample is taken over the whole dataset, so a stopped collector stays visible when the window is stepped
-back. Every chart fits its axis inside the quantity's own bounds, so an idle hour shows its own shape while the
-percentages still never leave 0-100.
+The charts show the gauges worth a line over time: CPU, memory, load, I/O and memory pressure, the filesystem behind
+`/`, disk throughput and disk latency, container CPU and memory, network in and out, battery charge and temperature.
+CPU pressure and the disk's saturation are collected but not charted: the first repeats the CPU chart, the second rides
+in the latency tooltip. Above them a strip of scalars: how long the box has been up, the age of its newest sample, and
+the window's CPU, memory and board temperature — each as the average with its peak beside it, since an average says
+what the box did and the peak says how far it went — then the disk, battery and container figures of the newest
+sample, which are state rather than traffic. A gauge that only some samples carry (containers and the drive's health,
+every sixth) reads its last known value instead of dropping out of the window, and the age of the newest sample is
+taken over the whole dataset, so a stopped collector stays visible when the window is stepped back. Every chart fits
+its axis inside the quantity's own bounds, so an idle hour shows its own shape while the percentages still never leave
+0-100.
 Everything the collector sends beyond those charts (per container, per mount) is in the "Latest sample" tile, which
 prints the newest row of the source flattened to `path · value` rows: a field a collector starts sending is readable
 without adding a tile for it.

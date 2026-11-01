@@ -7,6 +7,13 @@ import { LOAD, PERCENT, RATE, SHARE, TEMPERATURE } from '../lib/scale'
 /** `stats/collect.py`, run by a systemd timer on the server. */
 const SOURCE = 'eos-stats'
 
+/**
+ * The disk the collector reports. It sends only the disks a filesystem is
+ * mounted from, keyed by device name, and on eos that is the one SSD every
+ * user file, every container layer and every Parquet file lives on.
+ */
+const DISK = 'data.disk_io.nvme0n1'
+
 /** A gauge: one reading per sample, averaged over the bucket. */
 const gauge = (path: string) => `avg(${path}::DOUBLE)`
 
@@ -27,12 +34,24 @@ const diskNote = (values: (number | null)[]) => {
   return used == null ? null : `${formatNumber(used)} GB used`
 }
 
+/** The saturation behind the latency: `busy 4%`. */
+const busyNote = (values: (number | null)[]) => {
+  const [busy] = values
+  return busy == null ? null : `busy ${formatNumber(busy)}%`
+}
+
 /**
- * The server itself: CPU, memory, containers, disk, network, battery. A strip of
- * scalars above the tiles says how the box is doing right now — uptime,
- * freshness, and the window's CPU, memory and temperature with their peaks.
- * The tiles below are the gauges worth a line over time; everything else the
- * collector sends (per container, per mount) is in the last tile.
+ * The server itself: CPU, memory, pressure, containers, disk, network, battery.
+ * A strip of scalars above the tiles says how the box is doing right now —
+ * uptime, freshness, and the window's CPU, memory and temperature with their
+ * peaks. The tiles below are the gauges worth a line over time; everything else
+ * the collector sends (per container, per mount) is in the last tile.
+ *
+ * Pressure is the one pair of charts about waiting rather than working: PSI's
+ * share of time a task was stalled on I/O or on reclaim. A compaction that
+ * blocks readers moves those lines while the CPU chart stays flat, which is
+ * exactly the case a busy-but-fast server and a slow one are told apart by.
+ * They sit last, after the gauges that describe what the box was doing.
  *
  * Every chart fits its own axis (`lib/scale.ts`): a quiet server zooms in
  * rather than lying flat at the bottom of a 0-100 scale. Half-width tiles come
@@ -96,6 +115,35 @@ export default function Eos() {
         series={[{ label: 'Charge', expr: gauge('data.battery.charge_pct') }]}
       />
       <TimeSeriesTile
+        title="Disk I/O"
+        source={SOURCE}
+        yLabel="Rate [kB/s]"
+        yFit={RATE}
+        series={[
+          { label: 'Read', expr: gauge(`${DISK}.read_kbps`) },
+          { label: 'Write', expr: gauge(`${DISK}.write_kbps`) },
+        ]}
+      />
+      <TimeSeriesTile
+        title="Disk latency"
+        source={SOURCE}
+        yLabel="Latency [ms]"
+        // The drive answers in fractions of a millisecond when it is idle, so
+        // half of one is the shortest axis worth drawing; under load it climbs
+        // into single digits and the axis follows.
+        yFit={{ floor: 0, pad: 0.2, span: 0.5 }}
+        series={[
+          {
+            label: 'Latency',
+            expr: gauge(`${DISK}.await_ms`),
+            // Saturation belongs in the tooltip rather than on the axis: a
+            // percentage against a millisecond scale would be a second quantity.
+            extras: [gauge(`${DISK}.busy_pct`)],
+            note: busyNote,
+          },
+        ]}
+      />
+      <TimeSeriesTile
         title="Containers CPU"
         source={SOURCE}
         yLabel="Usage [%]"
@@ -136,6 +184,26 @@ export default function Eos() {
         yLabel="Temperature [°C]"
         yFit={TEMPERATURE}
         series={[{ label: 'Temperature', expr: gauge('data.battery.temp_c') }]}
+      />
+      <TimeSeriesTile
+        title="I/O pressure"
+        source={SOURCE}
+        yLabel="Stalled [%]"
+        yFit={PERCENT}
+        series={[
+          { label: 'Some', expr: gauge('data.pressure.io_some') },
+          { label: 'Full', expr: gauge('data.pressure.io_full') },
+        ]}
+      />
+      <TimeSeriesTile
+        title="Memory pressure"
+        source={SOURCE}
+        yLabel="Stalled [%]"
+        yFit={PERCENT}
+        series={[
+          { label: 'Some', expr: gauge('data.pressure.mem_some') },
+          { label: 'Full', expr: gauge('data.pressure.mem_full') },
+        ]}
       />
       <SnapshotTile wide source={SOURCE} title="Latest sample" />
     </div>
