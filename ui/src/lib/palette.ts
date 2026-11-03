@@ -43,6 +43,49 @@ export const BAR_FILL = 'hsla(150, 30%, 30%, 0.85)'
 export const BAR_OK_FILL = 'hsla(150, 32%, 32%, 0.85)'
 export const BAR_ERROR_FILL = 'hsla(0, 55%, 44%, 0.8)'
 
+/** The hue every source shares in the firehose bar chart: the chart green, so a
+ *  stack of sources still reads as the system's data divided up rather than as a
+ *  handful of unrelated quantities. */
+const SOURCE_HUE = 150
+/** The ramp's ends: dark enough that the lowest band is a band, light enough at
+ *  the top that ten of them still differ without any going pale enough to vanish
+ *  against the card. */
+const SOURCE_DARK = 24
+const SOURCE_LIGHT = 62
+
+/**
+ * Fills for `present`, aligned to it: shades of the chart green, ranked by name
+ * over the roster of every source the dataset holds, darkest first.
+ *
+ * A hue each would say less than it looks: the sources are not six quantities
+ * but one firehose divided up, and the tooltip names every band anyway. Shades
+ * say it the way a legend of one colour does.
+ *
+ * A source's shade is a function of the roster alone — not of the selected
+ * window, not of how much it sent, not of which other sources happen to be
+ * present — so a band can be followed from one range to the next, which is the
+ * only thing a shade is for. `roster` is that list, read once from the dataset;
+ * a source in `present` but not in the roster yet (it started since the page
+ * loaded) still takes a place, at the end of the alphabet.
+ *
+ * The ramp is spread over the roster rather than stepped at a fixed rate,
+ * because a shade a few percent off its neighbour is no shade at all. That makes
+ * the steps narrower as the roster grows — a dozen collectors would leave about
+ * four percent between neighbours, which is where the tooltip starts doing the
+ * work instead.
+ */
+export function sourceFills(present: readonly string[], roster: readonly string[]): string[] {
+  if (present.length === 0) return []
+  const ranked = [...new Set([...roster, ...present])].sort()
+  const span = Math.max(ranked.length - 1, 1)
+  return present.map((source) => {
+    const at = ranked.indexOf(source) / span
+    const lightness = Math.round(SOURCE_DARK + at * (SOURCE_LIGHT - SOURCE_DARK))
+    const saturation = Math.round(46 - at * 16)
+    return `hsl(${SOURCE_HUE}, ${saturation}%, ${lightness}%)`
+  })
+}
+
 /**
  * Faint wash of the series' hue under its curve, fading towards the baseline.
  * Every series gets one; a darker series' wash is darker, so the band under it

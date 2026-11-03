@@ -479,6 +479,21 @@ WHERE source = '${escape(source)}'
  *  unlike the request facets, this read stays fast on years of data. */
 export type EventSourceFacet = { v: string; n: number }
 
+/** `count(*)` for one source, as a chart series. The firehose chart stacks one
+ *  slice per source, so each column counts only its own rows and the bar's
+ *  height stays the incoming total. */
+export function sourceCountExpr(source: string): string {
+  return `count(*) FILTER (WHERE source = '${escape(source)}')`
+}
+
+/** Every source the dataset holds, alphabetically — the roster the firehose
+ *  chart hands its shades out along. One plain column, so this stays cheap on
+ *  years of data: Parquet reads only that column, and it is dictionary-encoded. */
+export function sourcesSql(): string {
+  return `SELECT coalesce(to_json(list(source)), '[]'::JSON)::VARCHAR
+FROM (SELECT DISTINCT source FROM events WHERE source IS NOT NULL ORDER BY 1)`
+}
+
 export function eventSourceFacetsSql(from: Date, to: Date): string {
   return `SELECT coalesce(to_json(array_agg(struct_pack(v := source, n := n) ORDER BY n DESC)), '[]'::JSON)::VARCHAR
 FROM (

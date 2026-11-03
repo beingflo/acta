@@ -165,6 +165,21 @@ export default function TimeSeriesTile(props: {
       ? props.metrics.map((entry) => ({ label: entry.label, expr: entry.metric }))
       : (props.series ?? [])
 
+  // What the plot was built from. uPlot fixes its series and their fills at
+  // construction, and a tile may discover its series at runtime — one per data
+  // source, say, each with a colour of its own — so a changed list has to
+  // rebuild the chart: `setData` with more columns than it has lines would
+  // silently drop the extra ones, and a fill handed in later would never be
+  // picked up.
+  const chartKey = createMemo(() =>
+    [
+      series()
+        .map((entry) => `${entry.label}\u0000${entry.expr}`)
+        .join('\u0001'),
+      props.fills?.join('\u0002') ?? '',
+    ].join('\u0003'),
+  )
+
   const id = props.title
   // Claimed during setup rather than when the query returns, so the summary
   // strip lists the charts in dashboard order, not reply order.
@@ -182,6 +197,8 @@ export default function TimeSeriesTile(props: {
 
   let container!: HTMLDivElement
   let chart: uPlot | undefined
+  // The `chartKey` the plot was constructed from; see its own note.
+  let builtFor: string | null = null
   let requestId = 0
   const [width, setWidth] = createSignal(0)
   const [loading, setLoading] = createSignal(false)
@@ -643,7 +660,21 @@ export default function TimeSeriesTile(props: {
     const chartWidth = width()
     if (chartWidth <= 0) return
     range() // re-run when the selected range changes
+    const key = chartKey()
+    if (chart && key !== builtFor) {
+      // A different set of series, or different colours: throw the plot away and
+      // build another. The tooltip and the spinner live beside uPlot's own nodes
+      // rather than inside its data, so both go with it.
+      chart.destroy()
+      chart = undefined
+      spinner?.remove()
+      spinner = undefined
+      tooltip = undefined
+      tooltipTime = undefined
+      tooltipValues = []
+    }
     if (!chart) {
+      builtFor = key
       chart = new uPlot(options(chartWidth), [[], ...series().map(() => [])], container)
       buildTooltip(chart.over)
       spinner = buildSpinner(container)

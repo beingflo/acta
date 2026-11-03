@@ -2,18 +2,28 @@ import { createEffect, createSignal } from 'solid-js'
 
 import { fetchData } from '../lib/api'
 import { formatCompact } from '../lib/format'
-import { type EventSourceFacet, eventSourceFacetsSql } from '../lib/query'
+import { type EventSourceFacet, eventSourceFacetsSql, sourcesSql } from '../lib/query'
 import { range } from '../lib/range'
 import FacetSelect from './FacetSelect'
 
 /**
- * The acta table's state: which source it is narrowed to, and the sources the
- * selected window holds. A plain column, so unlike the request filters this read
- * stays cheap on any window.
+ * The acta table's state: which source it is narrowed to, the sources the
+ * selected window holds, and the roster of every source the dataset holds. A
+ * plain column, so unlike the request filters these reads stay cheap on any
+ * window.
  */
 export function createSourceFilter() {
   const [source, setSource] = createSignal('')
   const [facets, setFacets] = createSignal<EventSourceFacet[] | null>(null)
+  const [roster, setRoster] = createSignal<string[]>([])
+
+  // The roster is not a window's answer but the dataset's, so it is read once:
+  // it is what the chart's colours are ordered by, and re-reading it with every
+  // range would re-decide shades that are meant to stay put. A collector that
+  // starts later takes its place on the next page load.
+  void fetchData<string[]>(sourcesSql())
+    .then((names) => setRoster(names ?? []))
+    .catch((error) => console.warn('could not read the source roster', error))
 
   // Per window, not per poll: a collector that starts or stops is worth noticing
   // when the range moves, not every ten seconds.
@@ -30,7 +40,7 @@ export function createSourceFilter() {
       })
   })
 
-  return { source, setSource, facets }
+  return { source, setSource, facets, roster }
 }
 
 /** The filter row above the acta chart: one source, chosen from the sources the

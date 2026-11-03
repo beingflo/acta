@@ -21,7 +21,8 @@ tile titles, and one thin line per series with a faint wash of the same hue unde
 tint vanishes against the white card at one pixel — and the palette is short and fixed: green for the data, and a
 darker green for a second series, so a tile with two sensors (the room temperature from each of them) can tell its
 lines apart without a second hue making the pair read as two different quantities. Each series carries its own faint
-wash.
+wash. The one chart whose series are categories rather than readings — the firehose bar chart, split by source — divides
+the same green into shades instead, one per source; the acta section below has the rule.
 Hovering a tile and pressing `v` expands it to fill the viewport;
 `v`, `Escape` or the tile's × restores it. Chart tiles get the whole plot, the event tables the whole list, which
 simply pages in as many extra rows as the taller viewport shows.
@@ -124,11 +125,19 @@ counts, and both views below it are narrowed to the chosen one. It belongs to th
 a collector that has gone quiet can be watched on its own instead of being fished out of the firehose — and `source` is
 a plain column, so this read costs nothing even on a year, unlike Marending's facet reads, which decode the payload.
 
-A full-width bar chart of incoming entries per bucket follows — every source counted together, or the chosen one — so a
-stalled collector or a spurt shows up as a quiet or busy stretch. Below it a table fills the rest of the viewport with
-the rows the filter leaves, newest first: time, source, and the payload as one compact JSON column. The payload is not flattened into
-a column per key, because sources share no schema and a wide event (the server stats) would need dozens of columns for
-every other source to leave empty. The JSON wraps to two lines, with the full text on hover.
+A full-width bar chart of incoming entries per bucket follows, one stacked slice per source, so a stalled collector or
+a spurt shows up as a quiet or busy stretch and the slice that stopped is the one missing from the bar; narrowing the
+filter draws the chosen source alone, at its own height. The bands are stacked in name order rather than by how much
+each source sent: a stack that reorders itself as traffic moves cannot be followed from one range to the next, which
+is what the dropdown's busiest-first order is for. Each source owns a shade of the chart's green, ranked along the same
+alphabet — darkest at the bottom, lightest at the top — over the roster of every source the dataset holds, read once
+when the dashboard mounts. Which sources are in the selected window therefore moves neither a band's place nor its
+shade; only a source the dataset has never seen before moves anything, by taking its place in the ramp. The ramp is
+stretched over that roster because a shade a few percent off its neighbour is no shade at all, so a much longer roster
+would leave the tooltip to tell close bands apart. Below it a table fills the rest of the viewport with the rows the
+filter leaves, newest first: time, source, and the payload as one compact JSON column. The payload is not flattened
+into a column per key, because sources share no schema and a wide event (the server stats) would need dozens of columns
+for every other source to leave empty. The JSON wraps to two lines, with the full text on hover.
 
 It is the same paged, virtualized table as Marending's, so a wide range is browsable at the same cost as the first
 screen.
