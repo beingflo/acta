@@ -2,7 +2,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show }
 
 import { fetchData } from '../lib/api'
 import { exitFullscreen, fullscreenTile, setHoveredTile } from '../lib/fullscreen'
-import { type OfficeHour, localDays, officeHoursSql } from '../lib/query'
+import { type OfficeSlot, localDays, officeHoursSql } from '../lib/query'
 import { range } from '../lib/range'
 import { autoRefresh } from '../lib/refresh'
 import ExpandButton from './ExpandButton'
@@ -35,21 +35,24 @@ const pad = (value: number) => String(value).padStart(2, '0')
 
 /**
  * The office as a calendar: one row per day over the selected range, one column
- * per hour, filled where the last known position was inside the box.
+ * per quarter hour, filled where the last known position was inside the box.
  *
  * Not a uPlot chart — this is a grid, not a series, and the point is to read a
- * month at a glance rather than to follow a curve. The hour states come from one
- * sparse query and are carried forward here: an hour with no fix is not an hour
- * away, it is an hour the tracker had nothing to say about.
+ * month at a glance rather than to follow a curve. The slot states come from one
+ * sparse query and are carried forward here: a slot with no fix is not a slot
+ * away, it is a quarter hour the tracker had nothing to say about. Each cell
+ * shows the state at its own start, so a walk-in fills the cell after it, never
+ * the one it began in — the chart above draws the crossing to the minute and the
+ * two must not disagree about the minute before it.
  */
 export default function OfficeLane() {
-  const [hours, setHours] = createSignal<OfficeHour[]>([])
+  const [hours, setHours] = createSignal<OfficeSlot[]>([])
   let requestId = 0
 
   const load = async () => {
     const request = ++requestId
     const { from, to } = range()
-    const reply = await fetchData<OfficeHour[]>(officeHoursSql(localDays(from, to, MAX_DAYS))).catch(
+    const reply = await fetchData<OfficeSlot[]>(officeHoursSql(localDays(from, to, MAX_DAYS))).catch(
       (error) => {
         console.warn('office hours query failed', error)
         return null
@@ -182,11 +185,12 @@ export default function OfficeLane() {
 }
 
 /**
- * The last known state at `at`: the newest hour at or before it. Sparse replies
- * are the norm — the tracker is quiet whenever the phone is — so the state holds
- * until the next one, and an hour before the first fix has none yet.
+ * The last known state at `at`: the newest slot whose fix had already happened.
+ * Sparse replies are the norm — the tracker is quiet whenever the phone is — so
+ * the state holds until the next one, and before the first fix the day has none
+ * yet.
  */
-function stateAt(known: OfficeHour[], at: number): number | null {
+function stateAt(known: OfficeSlot[], at: number): number | null {
   let state: number | null = null
   for (const row of known) {
     if (row.t * 1000 > at) break

@@ -950,36 +950,44 @@ export function localDays(from: Date, to: Date, limit = 60): Array<[Date, Date]>
   return days
 }
 
-/** One hour of the day lane: a day's start in epoch seconds and the state of the
- *  office at that hour, `1` inside and `0` outside. */
-export type OfficeHour = { t: number; s0: number }
+/** One quarter hour of the day lane: the office state at the slot's last fix,
+ *  with that fix's instant in epoch seconds, `1` inside and `0` outside. */
+export type OfficeSlot = { t: number; s0: number }
 
 /**
  * The office as a state per quarter hour, for the day lane — one query over the
  * whole clipped window rather than one per column.
  *
- * The state is the one at the bucket's *last* fix, not its first. A burst of
- * fixes is a walk: it starts outside and ends where the walk ended, so the first
- * fix of a slot spent arriving says "out" while the last one says "in". Taking
- * the last also makes the carry right, since a quiet slot inherits the state the
- * one before it ended in.
+ * The state is the one at the slot's *last* fix, not its first. A burst of fixes
+ * is a walk: it starts outside and ends where the walk ended, so the first fix of
+ * a slot spent arriving says "out" while the last one says "in". Taking the last
+ * also makes the carry right, since a quiet slot inherits the state the one
+ * before it ended in.
  *
- * Reply rows are *sparse*: only slots with a fix in them appear, so the lane
- * carries the last known state forward across the quiet ones. Buckets are
+ * The row is stamped with that fix's instant, not with the slot's start. A cell
+ * is green when the state it holds was already true at the cell's start, so
+ * stamping it at the start claims the office for up to a quarter of an hour
+ * *before* the fix that put the phone there — a walk-in at 08:13 turned the 08:00
+ * cell green, and since the lane's hour marks are drawn over the hour's span the
+ * eye read that as half past seven. The carry is unaffected: a slot the phone
+ * said nothing in has no row at all, and the last state it did send holds across
+ * it.
+ *
+ * Reply rows are *sparse*: only slots with a fix in them appear. Buckets are
  * UTC-aligned quarter hours, which map onto local quarter hours wherever the
  * offset is a whole number of quarters.
  */
 export function officeHoursSql(days: Array<[Date, Date]>): string {
-  return `SELECT coalesce(to_json(array_agg(struct_pack(t := b, s0 := st) ORDER BY b)),
+  return `SELECT coalesce(to_json(array_agg(struct_pack(t := t, s0 := st) ORDER BY t)),
            '[]'::JSON)::VARCHAR
 FROM (
-  SELECT epoch(time_bucket(INTERVAL '15 MINUTE', CAST(timestamp AS TIMESTAMP))) AS b,
+  SELECT epoch(max(CAST(timestamp AS TIMESTAMP))) AS t,
          arg_max(CASE WHEN ${AT_OFFICE} THEN 1 ELSE 0 END,
                  CAST(timestamp AS TIMESTAMP)) AS st
   FROM events
   WHERE source = 'location_florian' AND ${IS_FIX}
     AND timestamp >= TIMESTAMPTZ '${days[0]?.[0].toISOString() ?? '1970-01-01T00:00:00.000Z'}'
     AND timestamp <  TIMESTAMPTZ '${days[days.length - 1]?.[1].toISOString() ?? '1970-01-01T00:00:00.000Z'}'
-  GROUP BY 1
+  GROUP BY time_bucket(INTERVAL '15 MINUTE', CAST(timestamp AS TIMESTAMP))
 )`
 }

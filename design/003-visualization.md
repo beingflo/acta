@@ -267,7 +267,9 @@ Below it, the same question at another scale. A **day lane**: one row per day �
 many before it as the range is long, so `1d` is one row and `7d` is seven — one column per quarter hour between 06:00 and
 21:00 — the hours anyone is at the office — filled where the last known
 position was inside the box — a grid rather than a chart, since the
-point is to read a month at a glance. A day is only filled between its own first and last fix: the state holds forward
+point is to read a month at a glance. A cell holds the state at its own *start*, and its hour marks sit on the hour
+boundaries: a walk-in at 08:13 fills the 08:15 cell, never the one it began in, so the lane can read up to a quarter
+hour later than the chart above but never earlier. A day is only filled between its own first and last fix: the state holds forward
 between fixes, but before the first and after the last one the phone was merely silent, and claiming a night at the
 office from that silence is how the first version filled whole days. The day boundaries are built in the browser
 because DuckDB's bundled build has no timezone database, so local midnight and DST are the platform's business. The

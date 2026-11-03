@@ -906,9 +906,11 @@ body.fullscreen-tile {
   background: #fff;
 }
 
-/* One mark per hour, each taking the width of that hour's two half-hour cells:
-   same flex basis and same 1px gap as the cells, so a mark sits centred over the
-   pair rather than drifting along the row. */
+/* One mark per hour, each taking the width of that hour's four quarter-hour
+   cells — same flex basis and same 1px gap as the cells, so a mark's left edge
+   lands exactly on the hour's first column. Left-aligned rather than centred:
+   the mark names the boundary, and centring it over the hour put "07" at 07:30,
+   half an hour after the cells it was labelling. */
 .lane-hour-marks {
   display: flex;
   flex: 1;
@@ -918,7 +920,7 @@ body.fullscreen-tile {
 
 .lane-hour-marks span {
   flex: 1;
-  text-align: center;
+  text-align: left;
 }
 
 .lane-row {
