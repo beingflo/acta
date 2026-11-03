@@ -917,28 +917,20 @@ body.fullscreen-tile {
    under them, and the target for the drag that narrows the window. No card
    around it — it is a control, and the map above it is already framed. */
 .rug {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
+  min-width: 0;
 }
 
 .rug canvas {
-  flex: 1;
+  /* A block canvas at `width: 100%` rather than a flex item: the element sets its
+     own width attribute from what it measures, and a flex item's automatic
+     minimum size would make that attribute its floor — the strip measured
+     itself, grew, measured itself wider, and took the page with it. */
   display: block;
+  width: 100%;
   height: 48px;
   cursor: crosshair;
   /* A drag across the strip is a selection, not a scroll of the page. */
   touch-action: none;
-}
-
-.rug-edge {
-  /* On the axis-label line rather than centred on the strip, and as dark as the
-     dates: the window's bounds are what the strip is a control for. */
-  padding-bottom: 4px;
-  font-size: 11px;
-  color: #222222;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
 .tile.map {

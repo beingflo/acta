@@ -248,8 +248,10 @@ is drawn as a step, which is what a value quantised to five points is; altitude 
 dropped — it means "no altitude", and plotted as sea level it drew dips to the bottom of a day spent at 400 m.
 
 The map view keeps a strip under it: every fix in the window as a short stem on a bare time axis, with round local
-times labelled under it and the window's own bounds at the two ends. It answers "when was the phone moving" at a
-glance and, more to the point, it is the fastest way to narrow the window to the stretch that matters — dragging across
+times labelled under it — a clock when the ticks are hours apart, a date with its year when they are days apart — and
+the window's own bounds at the two ends, drawn on the strip so a narrow screen spends its width on the track rather
+than on two labels. It answers "when was the phone moving" at a glance and, more to the point, it is the fastest way to
+narrow the window to the stretch that matters — dragging across
 it selects that span, so finding the hour of a walk never means opening the range picker. Widening is left to the
 presets: a drag can only pick what is on screen. The profile view has no strip, since its charts do the same job and
 more.

@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
+import { createEffect, createSignal, onCleanup, onMount } from 'solid-js'
 
 import { fetchData } from '../lib/api'
 import { formatClock } from '../lib/format'
@@ -16,12 +16,10 @@ const STEM_BOTTOM = 24
 const AXIS_Y = 27
 const LABEL_Y = 30
 const MIN_DRAG = 4
-/** The axis labels' font, the room one needs on the strip (so the step is picked
- *  to keep them `LABEL_GAP` apart), and the clearance kept for the window's own
- *  edge label at either end. */
+/** The axis labels' font, and the room one needs on the strip: the step is picked
+ *  to keep them `LABEL_GAP` apart. */
 const LABEL_FONT = '11px ui-sans-serif, system-ui, sans-serif'
-const LABEL_GAP = 100
-const EDGE_ROOM = 30
+const LABEL_GAP = 104
 /** Dates are the anchor on this axis and clocks are the ticks between them, so
  *  the two are not set in the same grey. Both are dark: the strip is 10px text
  *  under a map, and a grey that looks quiet at a desk is unreadable on a phone
@@ -33,16 +31,18 @@ const CLOCK_FILL = '#555555'
  *  because a strip a few pixels tall has room for a handful of labels. */
 const STEPS = [
   60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86_400, 172_800,
-  604_800, 1_209_600, 2_592_000, 7_776_000, 31_536_000,
+  604_800, 1_209_600, 2_592_000, 7_776_000, 15_552_000, 31_536_000,
 ]
 
 const pad = (value: number) => String(value).padStart(2, '0')
 
-/** The label at one end of the strip: a clock, with the day in front when the
- *  window's two ends do not share one. */
-function edgeLabel(date: Date, withDay: boolean): string {
-  const clock = formatClock(date.getTime() / 1000)
-  return withDay ? `${pad(date.getDate())}/${pad(date.getMonth() + 1)} ${clock}` : clock
+/** The label at one end of the strip: the day, the year and the clock. The year
+ *  is always spelled out — a year-long window is where these bounds matter, and
+ *  `19/08` alone says nothing about which one. */
+function edgeLabel(date: Date): string {
+  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ${formatClock(
+    date.getTime() / 1000,
+  )}`
 }
 
 /**
@@ -51,14 +51,17 @@ function edgeLabel(date: Date, withDay: boolean): string {
  * that starts a new day — which is the only place a window a couple of days long
  * says which day a `6pm` belongs to. `date` says which of the two fills it takes.
  *
+ * Dates carry the year: these ticks span months, and across a year boundary a
+ * bare `19/08` is a different summer depending on which one.
+ *
  * Deliberately not `axisTickLabels`: a chart axis can spend a second line on the
  * rollover, and a strip this thin cannot, so it has to choose one of the two.
  */
 function tickLabel(date: Date, stepSeconds: number): { text: string; date: boolean } {
   if (stepSeconds >= 31_536_000) return { text: String(date.getFullYear()), date: true }
-  const day = `${pad(date.getDate())}/${pad(date.getMonth() + 1)}`
+  const day = `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`
   if (stepSeconds >= 86_400) return { text: day, date: true }
-  if (date.getHours() === 0 && date.getMinutes() === 0) return { text: `${day} 12am`, date: true }
+  if (date.getHours() === 0 && date.getMinutes() === 0) return { text: day, date: true }
   const text =
     stepSeconds < 3600
       ? formatClock(date.getTime() / 1000)
@@ -237,14 +240,30 @@ export default function TrackRug() {
     const ticks = ticksWithin(from, to, step)
     context.font = LABEL_FONT
     context.textBaseline = 'top'
+
+    // The window's own bounds, at the two ends of the axis: what the strip is a
+    // control for, so the exact times are always on it rather than only the
+    // round ones. Drawn into the canvas rather than beside it, so a narrow strip
+    // spends its width on the track and not on two labels.
+    const left = edgeLabel(from)
+    const right = edgeLabel(to)
+    context.fillStyle = DATE_FILL
+    context.textAlign = 'left'
+    context.fillText(left, 0, LABEL_Y)
+    context.textAlign = 'right'
+    context.fillText(right, w, LABEL_Y)
+    const leftRoom = context.measureText(left).width + 12
+    const rightRoom = context.measureText(right).width + 12
+
     for (const tick of ticks) {
       const x = Math.round(xOf(tick * 1000)) + 0.5
       context.fillStyle = '#dcdcdc'
       context.fillRect(Math.floor(x), AXIS_Y, 1, 3)
-      // A label that would run into the window's own edge label is dropped; the
-      // tick mark stays, and the axis still says where the round times fall.
-      if (x < EDGE_ROOM || x > w - EDGE_ROOM) continue
       const label = tickLabel(new Date(tick * 1000), step)
+      // A label that would run into a bound label is dropped; the tick mark
+      // stays, and the axis still says where the round times fall.
+      const half = context.measureText(label.text).width / 2
+      if (x - half < leftRoom || x + half > w - rightRoom) continue
       context.fillStyle = label.date ? DATE_FILL : CLOCK_FILL
       context.textAlign = 'center'
       context.fillText(label.text, x, LABEL_Y)
@@ -260,15 +279,8 @@ export default function TrackRug() {
     }
   })
 
-  const ends = createMemo(() => {
-    const { from, to } = range()
-    const withDay = from.toDateString() !== to.toDateString()
-    return [edgeLabel(from, withDay), edgeLabel(to, withDay)] as const
-  })
-
   return (
     <div class="rug" title="Drag across the strip to narrow the window to that span">
-      <span class="rug-edge">{ends()[0]}</span>
       <canvas
         ref={canvas}
         onPointerDown={onPointerDown}
@@ -276,7 +288,6 @@ export default function TrackRug() {
         onPointerUp={endDrag}
         onPointerCancel={onPointerCancel}
       />
-      <span class="rug-edge">{ends()[1]}</span>
     </div>
   )
 }
