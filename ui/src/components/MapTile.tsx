@@ -1,6 +1,6 @@
 import { createEffect, createSignal, onCleanup, onMount, Show } from 'solid-js'
 import type { FeatureCollection } from 'geojson'
-import { Map as MapLibreMap, addProtocol, type GeoJSONSource, type StyleSpecification } from 'maplibre-gl'
+import { Map as MapLibreMap, addProtocol, type GeoJSONSource, LngLatBounds, type StyleSpecification } from 'maplibre-gl'
 import { Protocol } from 'pmtiles'
 import { layers, namedFlavor } from '@protomaps/basemaps'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -138,6 +138,23 @@ export default function MapTile() {
     }
   }
 
+  /**
+   * Frame the window's fixes: their bounding box, with room around it for the
+   * stroke and for the attribution at the bottom.
+   *
+   * The map opens on a fixed centre, which is the right frame for a day at home
+   * and the wrong one for a day three valleys away; this is the answer to "where
+   * is the track" without hunting for it by hand. A window with a single fix has
+   * no box to fit, so `maxZoom` stands in for one — it lands on the fix rather
+   * than at the deepest zoom the tiles have.
+   */
+  const fitToFixes = () => {
+    if (!map || fixes.length === 0) return
+    const bounds = new LngLatBounds()
+    for (const fix of fixes) bounds.extend([fix.lon, fix.lat])
+    map.fitBounds(bounds, { padding: 48, maxZoom: 16, duration: 500 })
+  }
+
   onMount(() => {
     if (!protocolRegistered) {
       addProtocol('pmtiles', new Protocol().tile as never)
@@ -202,14 +219,23 @@ export default function MapTile() {
       if (!ready) fail(event.error)
     })
 
-    // `p` toggles points / line, but only while the pointer is over the map.
+    // `f` frames the window's fixes and is the answer to "where is the track"
+    // from anywhere on the dashboard — where the pointer usually is after a drag
+    // on the range strip. `p` changes what the map draws, so it stays the map's
+    // own key and acts only while the pointer is over it.
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return
-      if (!hovered() || event.key.toLowerCase() !== 'p') return
       const target = event.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
         return
       }
+      const letter = event.key.toLowerCase()
+      if (letter === 'f') {
+        event.preventDefault()
+        fitToFixes()
+        return
+      }
+      if (letter !== 'p' || !hovered()) return
       event.preventDefault()
       setMode((current) => (current === 'points' ? 'line' : 'points'))
     }

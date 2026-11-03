@@ -1,4 +1,4 @@
-import { createSignal, Show } from 'solid-js'
+import { createSignal, onCleanup, onMount, Show } from 'solid-js'
 
 import MapTile from '../components/MapTile'
 import TimeSeriesTile from '../components/TimeSeriesTile'
@@ -7,6 +7,9 @@ import { locationAltitudeSql, locationBatterySql } from '../lib/query'
 import { PERCENT } from '../lib/scale'
 
 type View = 'map' | 'profile'
+
+/** The views in tab order, which is also the order `⌘H` and `⌘L` walk. */
+const VIEWS: View[] = ['map', 'profile']
 
 /**
  * Where the phone has been, and what the track looked like along the way.
@@ -19,6 +22,25 @@ type View = 'map' | 'profile'
  */
 export default function Location() {
   const [view, setView] = createSignal<View>('map')
+
+  // `⌘H` and `⌘L` step between the views, left and right. Both are keys a desktop
+  // browser keeps for itself — hide the window, focus the address bar — so the
+  // handler asks for the key and takes it when it is given; where it is not, the
+  // tabs themselves remain the way. A lone `h` or `l` is history, and belongs to
+  // `lib/history.ts`.
+  onMount(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
+      const letter = event.key.toLowerCase()
+      if (letter !== 'h' && letter !== 'l') return
+      event.preventDefault()
+      const step = letter === 'h' ? -1 : 1
+      const next = (VIEWS.indexOf(view()) + step + VIEWS.length) % VIEWS.length
+      setView(VIEWS[next])
+    }
+    window.addEventListener('keydown', onKey)
+    onCleanup(() => window.removeEventListener('keydown', onKey))
+  })
 
   return (
     <div class="dashboard map">

@@ -230,10 +230,13 @@ neighbours.
 
 ### location
 
-The location dashboard has two views, switched by a pair of plain text tabs under the header. **Map** is the
-full-viewport tile: the position fixes in the selected range, drawn as a line joining them in time order by default,
-and `p` — with the pointer over the map — switching to points and back. The track is black rather than the chart green:
-over the basemap's parks and water it reads as ink instead of one more data line. **Profile** is the same fixes as two
+The location dashboard has two views, switched by a pair of plain text tabs under the header, and by `⌘H`/`⌘L` — the
+keys a desktop browser keeps for hiding itself and focusing its address bar, so the handler takes them when it can and
+leaves the tabs as the way when it cannot. **Map** is the full-viewport tile: the position fixes in the selected range,
+drawn as a line joining them in time order by default, and `p` — with the pointer over the map — switching to points and
+back. `f` frames the window's fixes on their own bounding box, which is the answer to "where is today's track" when it
+is not near the centre the map opens on. The track is black rather than the chart green: over the basemap's parks and
+water it reads as ink instead of one more data line. **Profile** is the same fixes as two
 full-width charts, altitude and battery charge, both drawn through the fixes themselves rather than through buckets,
 because the tracker reports only while the phone moves and a bucket would move a real sample to its own edge. Charge
 is drawn as a step, which is what a value quantised to five points is; altitude is a line, with the phone's `0`
@@ -365,7 +368,9 @@ from/to for a custom range (`?from=2026-10-10T00:00:00.000Z&to=2026-10-11T00:00:
 end writes `from` alone: the missing `to` means "resolve it to now when read", so reopening the URL keeps following
 the clock. The URL is read on load and on back/forward. Dashboard switches and range changes each push a history entry,
 so Back steps through the ranges visited before leaving the dashboard; landing on an entry never pushes another one,
-because the URL already matches.
+because the URL already matches. `h` and `l` walk that same history from the keyboard, which is how a zoom is undone:
+select the hour, look, `h` back to the day it came from. `Ctrl+H` and `Ctrl+L` are the other question — the window
+before, not the view before.
 
 Relative ranges and live-ended custom ranges always end at the wall clock. A feed that stops therefore leaves a recent
 window empty rather than silently showing the last window it had: the gap is what the dashboard should report. `all` is

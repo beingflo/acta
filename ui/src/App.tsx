@@ -11,6 +11,7 @@ import { fetchData } from './lib/api'
 import { loadScope, scope } from './lib/session'
 import { installDetailShortcuts } from './lib/detail'
 import { fullscreenTile, installFullscreenShortcuts } from './lib/fullscreen'
+import { installHistoryShortcuts } from './lib/history'
 import { customRange, installRangeShortcuts, preset, setDataBounds } from './lib/range'
 import { installRefreshShortcut, refreshTick } from './lib/refresh'
 import { applyRangeFromUrl, dashboardPath, rangeQuery, readDashboard, writeUrl } from './lib/url'
@@ -73,6 +74,9 @@ export default function App() {
 
     const uninstallRange = installRangeShortcuts()
     onCleanup(uninstallRange)
+
+    const uninstallHistory = installHistoryShortcuts()
+    onCleanup(uninstallHistory)
 
     const uninstallRefresh = installRefreshShortcut()
     onCleanup(uninstallRefresh)
