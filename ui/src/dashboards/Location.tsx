@@ -23,20 +23,24 @@ const VIEWS: View[] = ['map', 'profile']
 export default function Location() {
   const [view, setView] = createSignal<View>('map')
 
-  // `⌘H` and `⌘L` step between the views, left and right. Both are keys a desktop
-  // browser keeps for itself — hide the window, focus the address bar — so the
-  // handler asks for the key and takes it when it is given; where it is not, the
-  // tabs themselves remain the way. A lone `h` or `l` is history, and belongs to
-  // `lib/history.ts`.
+  // `t` cycles the views. One key rather than a left/right pair: every modifier
+  // that would have made a pair — `⌘H`/`⌘L`, `⌘[`/`⌘]`, `Ctrl+Tab` — is one a
+  // browser or the OS keeps for itself (hide the window, the address bar,
+  // history, the next browser tab). `VIEWS` is walked in order, so a third view
+  // later needs no new key.
   onMount(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
-      const letter = event.key.toLowerCase()
-      if (letter !== 'h' && letter !== 'l') return
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
+      if (event.key.toLowerCase() !== 't') return
+      const target = event.target as HTMLElement | null
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) {
+        return
+      }
       event.preventDefault()
-      const step = letter === 'h' ? -1 : 1
-      const next = (VIEWS.indexOf(view()) + step + VIEWS.length) % VIEWS.length
-      setView(VIEWS[next])
+      setView(VIEWS[(VIEWS.indexOf(view()) + 1) % VIEWS.length])
     }
     window.addEventListener('keydown', onKey)
     onCleanup(() => window.removeEventListener('keydown', onKey))

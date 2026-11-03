@@ -230,9 +230,9 @@ neighbours.
 
 ### location
 
-The location dashboard has two views, switched by a pair of plain text tabs under the header, and by `⌘H`/`⌘L` — the
-keys a desktop browser keeps for hiding itself and focusing its address bar, so the handler takes them when it can and
-leaves the tabs as the way when it cannot. **Map** is the full-viewport tile: the position fixes in the selected range,
+The location dashboard has two views, switched by a pair of plain text tabs under the header, and by `t`, which cycles
+them — one key rather than a left/right pair, since every modifier that would have made one belongs to the browser or
+the OS. **Map** is the full-viewport tile: the position fixes in the selected range,
 drawn as a line joining them in time order by default, and `p` — with the pointer over the map — switching to points and
 back. `f` frames the window's fixes on their own bounding box, which is the answer to "where is today's track" when it
 is not near the centre the map opens on. The track is black rather than the chart green: over the basemap's parks and
