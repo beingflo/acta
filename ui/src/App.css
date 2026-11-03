@@ -349,6 +349,11 @@ body.fullscreen-tile {
 }
 
 .latest-card-value {
+  /* The row of cards shares out the tallest card's height, so a card whose title
+     fits on one line has slack in it. Give that slack to the top rather than the
+     bottom: the numbers then sit on one line across the strip, and a longer
+     title grows upward instead of shoving its number down. */
+  margin-top: auto;
   font-size: 19px;
   font-weight: 500;
   color: #111;
@@ -364,6 +369,9 @@ body.fullscreen-tile {
 }
 
 .latest-card-sub {
+  /* One line high even when empty, so that a card without a detail keeps its
+     number on the same baseline as the ones beside it. */
+  min-height: 12px;
   overflow: hidden;
   font-size: 10px;
   color: #999;

@@ -284,7 +284,7 @@ export function overviewSql(from: Date, to: Date): string {
   return `SELECT to_json(struct_pack(
            rows := count(*),
            sources := count(DISTINCT source),
-           source_names := list(DISTINCT source),
+           source_names := coalesce(list(DISTINCT source), []),
            last_hour := count(*) FILTER (WHERE timestamp >= TIMESTAMPTZ '${lastHour}'),
            newest := (SELECT epoch(CAST(max(timestamp) AS TIMESTAMP)) FROM events)
          ))::VARCHAR

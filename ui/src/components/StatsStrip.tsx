@@ -36,9 +36,10 @@ export default function StatsStrip(props: { stats: Stat[] }) {
                 <span class="latest-card-unit">{stat.unit}</span>
               </Show>
             </div>
-            <Show when={stat.detail}>
-              <div class="latest-card-sub">{stat.detail}</div>
-            </Show>
+            {/* Drawn even when the stat has no detail: the values hug the bottom
+                of their card, so a card that skipped this line would place its
+                number one line lower than the rest of the row. */}
+            <div class="latest-card-sub">{stat.detail ?? ''}</div>
           </div>
         )}
       </For>
