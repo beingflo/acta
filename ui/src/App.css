@@ -850,10 +850,95 @@ body.fullscreen-tile {
 }
 
 /* Full-height map dashboard. The map fills the tile edge to edge; the tile's
-   border provides the frame. */
+   border provides the frame. A column rather than the dashboard's grid: the
+   strip at the bottom belongs to the map view only, and a row that comes and
+   goes is a gap the grid would keep. */
 .dashboard.map {
-  grid-template-columns: 1fr;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   height: 100%;
+}
+
+/* A view switch inside a dashboard: plain text with the active one underlined,
+   lighter than the boxed range presets it sits under, since it changes what the
+   page shows rather than which window it shows. */
+.views {
+  display: flex;
+  gap: 16px;
+}
+
+.views button {
+  padding: 0 0 3px;
+  font-size: 12px;
+  color: #6e6e6e;
+  border-bottom: 1px solid transparent;
+}
+
+.views button:hover {
+  color: #333;
+}
+
+.views button.active {
+  color: #111;
+  border-bottom-color: #111;
+}
+
+/* Holds the map while the profile is showing. `display: none` rather than
+   unmounting the tile: the map keeps its tiles, its GL context and the place it
+   was panned to, and MapLibre's own ResizeObserver re-fits it on return. */
+.map-slot {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.map-slot.hidden {
+  display: none;
+}
+
+.map-slot > .tile {
+  flex: 1;
+  min-height: 0;
+}
+
+/* The profile's charts keep their own heights and scroll inside the row, so a
+   short screen does not cut the second one off. */
+.profile {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The window's fixes on a bare time axis: one stem each, the round local times
+   under them, and the target for the drag that narrows the window. No card
+   around it — it is a control, and the map above it is already framed. */
+.rug {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.rug canvas {
+  flex: 1;
+  display: block;
+  height: 48px;
+  cursor: crosshair;
+  /* A drag across the strip is a selection, not a scroll of the page. */
+  touch-action: none;
+}
+
+.rug-edge {
+  /* On the axis-label line rather than centred on the strip, and as dark as the
+     dates: the window's bounds are what the strip is a control for. */
+  padding-bottom: 4px;
+  font-size: 11px;
+  color: #222222;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .tile.map {

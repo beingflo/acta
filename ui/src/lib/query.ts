@@ -240,6 +240,55 @@ FROM (
 )`
 }
 
+/**
+ * One point per fix, `{ t, s0 }`, with `expr` read off the fix's own payload.
+ *
+ * Not bucketed, for the reason the presence chart is not: the tracker reports
+ * only while the phone moves, so a bucket would move a real sample to the
+ * bucket's edge and invent a value for the quiet stretches around it.
+ */
+function fixSeriesSql(from: Date, to: Date, expr: string): string {
+  return `SELECT coalesce(to_json(array_agg(struct_pack(t := t, s0 := v) ORDER BY t)),
+           '[]'::JSON)::VARCHAR
+FROM (
+  SELECT epoch(CAST(timestamp AS TIMESTAMP)) AS t,
+         ${expr} AS v
+  FROM events
+  WHERE source = 'location_florian'
+    AND ${IS_FIX}
+    AND ${eventWindow(from, to)}
+)`
+}
+
+/** Altitude per fix, in metres. `0` is dropped: the phone writes it when it has
+ *  no altitude at all, and plotted as sea level it drew dips to the bottom of the
+ *  chart on a day spent at 400 m. The rest is the reading, error and all — the
+ *  values reach 2,200 m on a day in the mountains and 10.8 km on a flight, which
+ *  is the data doing its job. Fixes are sparse, so this is the shape of a day
+ *  out rather than an elevation profile of the ground. */
+export function locationAltitudeSql(from: Date, to: Date): string {
+  return fixSeriesSql(from, to, 'nullif(TRY_CAST(data.properties.altitude AS DOUBLE), 0)')
+}
+
+/** Battery charge per fix, in percent. The phone quantises it to five-point
+ *  steps, which the chart draws as steps: a slope would suggest a discharge
+ *  nobody measured. */
+export function locationBatterySql(from: Date, to: Date): string {
+  return fixSeriesSql(from, to, 'TRY_CAST(data.properties.battery_level AS DOUBLE) * 100')
+}
+
+/** When each fix in the window happened, as epoch seconds: the range strip's
+ *  stems, which say when the phone was moving and take the drag that narrows the
+ *  window. */
+export function locationFixTimesSql(from: Date, to: Date): string {
+  return `SELECT coalesce(to_json(array_agg(epoch(CAST(timestamp AS TIMESTAMP)) ORDER BY timestamp)),
+           '[]'::JSON)::VARCHAR
+FROM events
+WHERE source = 'location_florian'
+  AND ${IS_FIX}
+  AND ${eventWindow(from, to)}`
+}
+
 function escape(value: string): string {
   return value.replace(/'/g, "''")
 }

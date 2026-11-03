@@ -230,10 +230,21 @@ neighbours.
 
 ### location
 
-A single full-width and full-height tile showing a map fed by the `location_florian` data source: the position fixes
-in the selected range are plotted. They are drawn as a line joining them in time order by default; hovering the map and
-pressing `p` switches to points and back. The track is black rather than the chart green: over the basemap's parks and
-water it reads as ink instead of one more data line.
+The location dashboard has two views, switched by a pair of plain text tabs under the header. **Map** is the
+full-viewport tile: the position fixes in the selected range, drawn as a line joining them in time order by default,
+and `p` — with the pointer over the map — switching to points and back. The track is black rather than the chart green:
+over the basemap's parks and water it reads as ink instead of one more data line. **Profile** is the same fixes as two
+full-width charts, altitude and battery charge, both drawn through the fixes themselves rather than through buckets,
+because the tracker reports only while the phone moves and a bucket would move a real sample to its own edge. Charge
+is drawn as a step, which is what a value quantised to five points is; altitude is a line, with the phone's `0`
+dropped — it means "no altitude", and plotted as sea level it drew dips to the bottom of a day spent at 400 m.
+
+The map view keeps a strip under it: every fix in the window as a short stem on a bare time axis, with round local
+times labelled under it and the window's own bounds at the two ends. It answers "when was the phone moving" at a
+glance and, more to the point, it is the fastest way to narrow the window to the stretch that matters — dragging across
+it selects that span, so finding the hour of a walk never means opening the range picker. Widening is left to the
+presets: a drag can only pick what is on screen. The profile view has no strip, since its charts do the same job and
+more.
 
 The basemap is self-hosted. The service serves PMTiles archives from `tiles/` and the frontend renders them with
 MapLibre GL and the PMTiles protocol as several stacked sources, coarsest first: a world basemap, a mid-zoom set
