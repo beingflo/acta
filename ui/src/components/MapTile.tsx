@@ -6,6 +6,7 @@ import { layers, namedFlavor } from '@protomaps/basemaps'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
 import { fetchData } from '../lib/api'
+import { formatTimestamp } from '../lib/format'
 import { TRACK } from '../lib/palette'
 import { locationPointsSql } from '../lib/query'
 import { range } from '../lib/range'
@@ -31,8 +32,14 @@ const SPRITE = `https://protomaps.github.io/basemaps-assets/sprites/v3/${THEME}`
 const ATTRIBUTION =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
 
-type Fix = { lon: number; lat: number }
+type Fix = { t: number; lon: number; lat: number }
 type LocationMode = 'points' | 'line'
+
+/** How near the pointer has to be to the track, in pixels, for it to answer. */
+const HOVER_RADIUS = 12
+/** Room saved under the map for MapLibre's attribution, which a tooltip pinned
+ *  to the bottom of the tile would otherwise sit on top of. */
+const TOOLTIP_INSET = 28
 
 let protocolRegistered = false
 
@@ -99,11 +106,59 @@ function toLine(fixes: Fix[]): FeatureCollection {
   }
 }
 
+/** One stretch of track, for the hover highlight. */
+function toSegment(from: Fix, to: Fix): FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: [[from.lon, from.lat], [to.lon, to.lat]] },
+        properties: {},
+      },
+    ],
+  }
+}
+
+const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] }
+
+/** Squared distance from a point to a segment, all in screen pixels — squared
+ *  because it is only ever compared against a radius, never displayed. */
+function segmentDistance(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): number {
+  const vx = bx - ax
+  const vy = by - ay
+  const length = vx * vx + vy * vy
+  const along = length === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / length))
+  const dx = ax + along * vx - px
+  const dy = ay + along * vy - py
+  return dx * dx + dy * dy
+}
+
 export default function MapTile() {
   let container!: HTMLDivElement
   let map: MapLibreMap | undefined
   let ready = false
   let fixes: Fix[] = []
+
+  // Screen positions of the fixes, one x, y pair each. The hover search runs on
+  // every pointer move, and projecting a year of fixes on each of them would be
+  // the whole cost of the feature; the camera settling is what invalidates them.
+  let screen = new Float32Array(0)
+  let tooltip: HTMLDivElement | undefined
+  let tooltipTime: HTMLDivElement | undefined
+  let hoverFrame = 0
+  let hoverPoint: { x: number; y: number } | null = null
+  // A pan or zoom moves the fixes under the pointer, so nothing is answered
+  // until it settles — otherwise the tooltip would chase the camera with the
+  // positions it had before the drag.
+  let panning = false
 
   const [mode, setMode] = createSignal<LocationMode>('line')
   const [hovered, setHovered] = createSignal(false)
@@ -125,6 +180,13 @@ export default function MapTile() {
     const lineVisibility = mode() === 'line' ? 'visible' : 'none'
     map.setLayoutProperty('location-line-layer', 'visibility', lineVisibility)
     map.setLayoutProperty('location-points-layer', 'visibility', mode() === 'points' ? 'visible' : 'none')
+    map.setLayoutProperty(
+      'location-hover-point-layer',
+      'visibility',
+      mode() === 'points' ? 'visible' : 'none',
+    )
+    clearHover()
+    projectFixes()
   }
 
   const loadFixes = async () => {
@@ -153,6 +215,122 @@ export default function MapTile() {
     const bounds = new LngLatBounds()
     for (const fix of fixes) bounds.extend([fix.lon, fix.lat])
     map.fitBounds(bounds, { padding: 48, maxZoom: 16, duration: 500 })
+  }
+
+  /** Where every fix is on screen, for the hover search. Rebuilt when the camera
+   *  settles rather than per pointer move. */
+  const projectFixes = () => {
+    if (!map) return
+    screen = new Float32Array(fixes.length * 2)
+    for (let i = 0; i < fixes.length; i++) {
+      const at = map.project([fixes[i].lon, fixes[i].lat])
+      screen[i * 2] = at.x
+      screen[i * 2 + 1] = at.y
+    }
+  }
+
+  /**
+   * What the track near `x, y` is: the nearest stretch of it, or the nearest fix
+   * when the map draws points.
+   *
+   * A stretch rather than a fix, because most of a drawn track is between two
+   * fixes — and the question being asked of the map is "when was this bit",
+   * which the two ends of the stretch answer together.
+   */
+  const hoverAt = (x: number, y: number): { from: Fix; to: Fix | null } | null => {
+    if (fixes.length === 0 || screen.length !== fixes.length * 2) return null
+    const limit = HOVER_RADIUS * HOVER_RADIUS
+    let best = -1
+    let nearest = limit
+    if (mode() === 'points' || fixes.length === 1) {
+      for (let i = 0; i < fixes.length; i++) {
+        const away = segmentDistance(x, y, screen[i * 2], screen[i * 2 + 1], screen[i * 2], screen[i * 2 + 1])
+        if (away < nearest) {
+          nearest = away
+          best = i
+        }
+      }
+      return best < 0 ? null : { from: fixes[best], to: null }
+    }
+    for (let i = 0; i < fixes.length - 1; i++) {
+      const away = segmentDistance(
+        x,
+        y,
+        screen[i * 2],
+        screen[i * 2 + 1],
+        screen[i * 2 + 2],
+        screen[i * 2 + 3],
+      )
+      if (away < nearest) {
+        nearest = away
+        best = i
+      }
+    }
+    return best < 0 ? null : { from: fixes[best], to: fixes[best + 1] }
+  }
+
+  /** The tooltip, placed beside the pointer and kept inside the tile. */
+  const showTooltip = (fix: Fix, x: number, y: number) => {
+    if (!tooltip || !tooltipTime) return
+    const { from, to } = range()
+    tooltipTime.textContent = formatTimestamp(fix.t, to.getTime() - from.getTime())
+    tooltip.style.display = ''
+    const gap = 12
+    const boxWidth = tooltip.offsetWidth
+    const boxHeight = tooltip.offsetHeight
+    const left =
+      x + gap + boxWidth > container.clientWidth ? x - gap - boxWidth : x + gap
+    const top =
+      y + gap + boxHeight > container.clientHeight - TOOLTIP_INSET
+        ? y - gap - boxHeight
+        : y + gap
+    tooltip.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`
+  }
+
+  const clearHover = () => {
+    if (!map || !ready) return
+    const source = map.getSource('location-hover') as GeoJSONSource | undefined
+    if (tooltip && tooltip.style.display !== 'none') {
+      tooltip.style.display = 'none'
+      source?.setData(EMPTY)
+    }
+  }
+
+  const updateHover = (x: number, y: number) => {
+    if (!map || !ready || panning) return
+    const hit = hoverAt(x, y)
+    if (!hit) {
+      clearHover()
+      return
+    }
+    const source = map.getSource('location-hover') as GeoJSONSource | undefined
+    source?.setData(
+      hit.to
+        ? toSegment(hit.from, hit.to)
+        : {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [hit.from.lon, hit.from.lat] },
+                properties: {},
+              },
+            ],
+          },
+    )
+    showTooltip(hit.from, x, y)
+  }
+
+  /** One search per frame: pointer moves arrive faster than the search is worth. */
+  const queueHover = (point: { x: number; y: number }) => {
+    hoverPoint = point
+    if (hoverFrame) return
+    hoverFrame = requestAnimationFrame(() => {
+      hoverFrame = 0
+      const at = hoverPoint
+      hoverPoint = null
+      if (at) updateHover(at.x, at.y)
+    })
   }
 
   onMount(() => {
@@ -208,10 +386,57 @@ export default function MapTile() {
           'circle-opacity': 0.7,
         },
       })
+      // The hovered stretch, drawn in the track's own ink over a white casing so
+      // it reads as "this bit" rather than as a second kind of line.
+      map.addSource('location-hover', { type: 'geojson', data: EMPTY })
+      map.addLayer({
+        id: 'location-hover-casing-layer',
+        type: 'line',
+        source: 'location-hover',
+        // Butt caps rather than round: a stretch between two fixes a few pixels
+        // apart would otherwise render as a stadium shape and read as two dots.
+        layout: { 'line-join': 'round', 'line-cap': 'butt' },
+        paint: { 'line-color': '#ffffff', 'line-width': 7, 'line-opacity': 0.85 },
+      })
+      map.addLayer({
+        id: 'location-hover-layer',
+        type: 'line',
+        source: 'location-hover',
+        layout: { 'line-join': 'round', 'line-cap': 'butt' },
+        paint: { 'line-color': TRACK, 'line-width': 3 },
+      })
+      // The same source carries a point when the map draws points; each layer
+      // ignores the other's geometry. Kept hidden while the map draws the track
+      // as a line — there the highlighted stretch is the answer, and a marker on
+      // top of it only looked like the stretch had two round ends.
+      map.addLayer({
+        id: 'location-hover-point-layer',
+        type: 'circle',
+        source: 'location-hover',
+        layout: { visibility: 'none' },
+        paint: {
+          'circle-radius': 5,
+          'circle-color': TRACK,
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+        },
+      })
       ready = true
       applyData()
       void loadFixes()
     })
+
+      map.on('mousemove', (event) => queueHover(event.point))
+      map.on('click', (event) => queueHover(event.point))
+      map.on('mouseout', () => clearHover())
+      map.on('movestart', () => {
+        panning = true
+        clearHover()
+      })
+      map.on('moveend', () => {
+        panning = false
+        projectFixes()
+      })
     map.on('error', (event) => {
       console.error('map error', event.error)
       // Once the style is up an error is one tile or one glyph range, and the map
@@ -241,16 +466,35 @@ export default function MapTile() {
     }
     window.addEventListener('keydown', onKey)
 
-    const observer = new ResizeObserver(() => map?.resize())
+    const observer = new ResizeObserver(() => {
+      map?.resize()
+      projectFixes()
+    })
     observer.observe(container)
+
+    // The tooltip is built imperatively and lives inside the map container, the
+    // way the chart tiles' tooltips live inside uPlot's overlay: MapLibre owns
+    // everything it is given, and a Solid-managed child would be cleared with it.
+    tooltip = document.createElement('div')
+    tooltip.className = 'map-tooltip'
+    tooltip.style.display = 'none'
+    tooltipTime = document.createElement('div')
+    tooltipTime.className = 'map-tooltip-time'
+    tooltip.append(tooltipTime)
+    container.append(tooltip)
 
     onCleanup(() => {
       window.removeEventListener('keydown', onKey)
       window.clearTimeout(watchdog)
       observer.disconnect()
+      cancelAnimationFrame(hoverFrame)
+      tooltip?.remove()
+      tooltip = undefined
+      tooltipTime = undefined
       map?.remove()
       map = undefined
       ready = false
+      screen = new Float32Array(0)
     })
   })
 

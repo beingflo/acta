@@ -235,8 +235,13 @@ them — one key rather than a left/right pair, since every modifier that would 
 the OS. **Map** is the full-viewport tile: the position fixes in the selected range,
 drawn as a line joining them in time order by default, and `p` — with the pointer over the map — switching to points and
 back. `f` frames the window's fixes on their own bounding box, which is the answer to "where is today's track" when it
-is not near the centre the map opens on. The track is black rather than the chart green: over the basemap's parks and
-water it reads as ink instead of one more data line. **Profile** is the same fixes as two
+is not near the centre the map opens on. Hovering the track — or tapping it, which is what a phone gets — answers
+*when* that piece of it happened: the stretch under the pointer thickens over a white casing and a tooltip gives its
+time. The search is by stretch rather than by fix, since most of a drawn track lies between two fixes, and it runs
+against screen positions cached when the camera settles, so a year of fixes costs nothing per pointer move; the map is
+left alone mid-gesture, where there is no stable answer to give. With points drawn, the fix itself is ringed instead.
+The track is black rather than the chart green: over the basemap's parks and water it reads as ink instead of one more
+data line. **Profile** is the same fixes as two
 full-width charts, altitude and battery charge, both drawn through the fixes themselves rather than through buckets,
 because the tracker reports only while the phone moves and a bucket would move a real sample to its own edge. Charge
 is drawn as a step, which is what a value quantised to five points is; altitude is a line, with the phone's `0`

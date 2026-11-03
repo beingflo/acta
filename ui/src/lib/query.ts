@@ -222,14 +222,18 @@ function onGrid(
   return [timestamps, ...values] as uPlot.AlignedData
 }
 
-/** Location fixes as `{ lon, lat }` pairs, in time order, for the map tile. */
+/** Location fixes as `{ t, lon, lat }`, in time order, for the map tile: where
+ *  each one is and when it was taken, so the map can say when a piece of the
+ *  track happened. Seconds are cast to a whole number — a year of fixes is most
+ *  of a megabyte already, and `1762156179.0` spends two bytes a row on nothing. */
 export function locationPointsSql(from: Date, to: Date): string {
   return `SELECT coalesce(
-           to_json(array_agg(struct_pack(lon := lon, lat := lat) ORDER BY ts)),
+           to_json(array_agg(struct_pack(t := t, lon := lon, lat := lat) ORDER BY ts)),
            '[]'::JSON
          )::VARCHAR
 FROM (
   SELECT timestamp AS ts,
+         CAST(epoch(CAST(timestamp AS TIMESTAMP)) AS BIGINT) AS t,
          data.geometry.coordinates[1]::DOUBLE AS lon,
          data.geometry.coordinates[2]::DOUBLE AS lat
   FROM events

@@ -970,6 +970,31 @@ body.fullscreen-tile {
   pointer-events: none;
 }
 
+/* What a hovered stretch of track was: when it started, when it ended and how
+   long it was. The chart tooltip's clothes, since it answers the same kind of
+   question in the same place — under the pointer, over the data. */
+.map-tooltip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  padding: 5px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  background: #fff;
+  border: 1px solid #c9c9c9;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.map-tooltip-time {
+  color: #111;
+  font-variant-numeric: tabular-nums;
+}
+
+
 
 /* The day lane: a grid, not a chart. Day labels on the left, one column per hour,
    cell filled where the last known position was inside the office box. */
