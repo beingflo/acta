@@ -221,6 +221,25 @@ current hour. Hour files retire into day files at the end of their day, so the h
 granularity of the backup; day files of a month that has already folded into a `month-` file may never have been
 uploaded if the service was down for the whole month, in which case the month file covers those rows.
 
+Every object is encrypted before it is uploaded: `age` with an X25519 recipient, over the whole Parquet file, stored
+as `<name>.parquet.age`. The bucket therefore holds ciphertext only — the provider can store and delete the archive
+but not read it — and the suffix makes that a property of the object rather than of the configuration it was written
+under. Files are not ASCII-armored: armor is for text channels and costs a third of the size for nothing here. What
+stays in the clear is only metadata: the file name, which is a tier and a span, and the object's size and upload
+time, which approximate the plaintext's. Server-side encryption (SSE-KMS, SSE-C) was deliberately rejected: it leaves
+the key with, or at least passing through, the provider. `age` authenticates each object, but does not bind its
+content to its name, so a provider that rewrote the bucket could file a valid object under another name; the threat
+model is a curious provider, not a tampering one.
+
+Only the public recipient is on the server: `ACTA_BACKUP_AGE_RECIPIENT` is rendered into the unit like the bucket,
+because a public key can only encrypt. The matching identity is the 1Password item `Acta backup age key` and exists
+nowhere else — not in `.deploy.secrets.enc`, not as a podman secret — so a compromised host cannot hand over the
+archive along with the credentials. Encryption is not optional and has no switch: enabling the backup without a
+usable recipient is a startup error. It also means the service can never check that the archive it writes is
+openable — a recipient that does not match the vault key looks exactly like a healthy backup, and the dashboard stays
+green. Decrypting the newest object after a recipient change is the only check there is, so do it before discarding
+an older archive.
+
 Every pass reports itself. One row is written to the `acta-backup` source whether it succeeded or not, carrying
 `ok`, `uploaded`, `duration_ms`, the error message on failure, and `bucket_age_s` — the age of the newest object in
 the bucket measured *before* the pass uploaded anything, which is how a compaction that stopped producing files shows
@@ -236,16 +255,18 @@ Nothing is sent for a failed pass, so a monitor on that URL alarms when the ping
 cover: the service being gone. The URL is pinged as configured, so the provider's grace window is what decides how
 long an outage goes unnoticed; three hours suits an hourly loop that also pings at startup.
 
-The bucket holds the file names verbatim under an optional `ACTA_S3_PREFIX`. Restore (`acta restore`, run as a
-one-shot container with the data volume mounted, see `mise run deploy:restore`) fetches the coarsest file the bucket
-carries for each span: an hour file is skipped when the bucket also holds its day file (or that day's month file), and
-a day file when it holds the month file. Restore only ever adds, so existing files are kept and files the bucket does
-not carry are never removed; the check is per object against the bucket listing, so a span left without a coarser file
-(the service was down at that fold) still comes back from its finer files. `mise run restore [dir]` runs the same
-restore locally with the release build and the credentials from `.deploy.secrets.enc`, which is how a dev dataset is
-rebuilt from the bucket; it defaults to the checkout's `data/`. A directory that already held superseded files still
-has them reconciled by the first compaction pass after startup, with the existing "target exists, so trash the inputs"
-rule.
+Objects live under an optional `ACTA_S3_PREFIX`. Restore (`acta restore`, which reads `ACTA_BACKUP_AGE_IDENTITY`
+from the environment and so only runs where the vault is) fetches and decrypts the coarsest file the bucket carries
+for each span: an hour file is skipped when the bucket also holds its day file (or that day's month file), and a day
+file when it holds the month file. Restore only ever adds, so existing files are kept and files the bucket does not
+carry are never removed; the check is per object against the bucket listing, so a span left without a coarser file
+(the service was down at that fold) still comes back from its finer files. `mise run restore [dir]` runs it locally
+with the release build, the S3 credentials from `.deploy.secrets.enc` and the identity from 1Password, which is how a
+dev dataset is rebuilt from the bucket; it defaults to the checkout's `data/`, and `mise run deploy:seed` then loads
+that directory onto the host. An object without the `.age` suffix is a hard error rather than something guessed at:
+it is an archive from before the backup was encrypted, and it needs `age -d` by hand. A directory that already held
+superseded files still has them reconciled by the first compaction pass after startup, with the existing "target
+exists, so trash the inputs" rule.
 
 Credentials come from `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (podman secrets); bucket, region, endpoint and
 prefix from the environment. The upload speaks the S3 protocol but is not tied to AWS: it runs against Backblaze B2,
@@ -291,6 +312,8 @@ spill location is `.tmp` inside it, so any sort that outgrows its memory limit �
 Credentials are podman secrets: `acta-auth-ui-user`/`-password`, `acta-auth-home-user`/`-password` (optional — omit both
 to run without the restricted viewer), `acta-auth-sensor-user`/`-password`,
 `acta-aws-key-id`, `acta-aws-secret` and `acta-backup-ping-url` (optional), installed with `mise run deploy:secrets`.
+The backup's age identity is deliberately not one of them: the service encrypts and never decrypts, so the private key
+stays in 1Password.
 Both halves of each auth pair are secrets, so a username never appears in the unit either. The values are committed as
 ciphertext in
 `.deploy.secrets.enc`, a sops dotenv file encrypted to the age recipient in `.sops.yaml`; the private key is the
@@ -300,7 +323,8 @@ left behind; only the ciphertext is committed, so the committed file is the sing
 credentials. The plaintext `.deploy.secrets` is gitignored and is not part of the round trip.
 
 `mise run deploy:seed <dir>` imports a fresh dataset and refuses a volume that already holds data, printing the
-command to clear it; `mise run deploy:restore` recovers one from S3. Only one container may use the data volume at a
+command to clear it; a recovery is `mise run restore <dir>`, which decrypts the archive into a local directory, then
+`mise run deploy:seed <dir>`. Only one container may use the data volume at a
 time: the service assumes it owns the tree, including `.staging/` and `.trash/`.
 
 `.deploy.env` (committed) holds the non-secret inputs, led by `ACTA_HOST` and the S3 settings; the file lists every
@@ -378,9 +402,11 @@ secrets, so the deploy always enables authentication.
 | `ACTA_S3_PREFIX` | empty | Optional key prefix. |
 | `ACTA_S3_ALLOW_HTTP` | `off` | Allow a plain-HTTP endpoint (for example a local MinIO). |
 | `ACTA_BACKUP_PING_URL` | unset | Pinged after every error-free pass, for a dead-man's-switch monitor. A podman secret. |
+| `ACTA_BACKUP_AGE_RECIPIENT` | unset | Required when backup is on: the age public key (`age1…`) every object is encrypted to. Missing or unparsable is a startup error. |
+| `ACTA_BACKUP_AGE_IDENTITY` | unset | Read only by `acta restore`: the private half of that key (`AGE-SECRET-KEY-1…`). Never installed on the server. |
 | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` | unset | Required when backup is on. |
 
-With `ACTA_BACKUP` off, none of the S3 variables are read and no upload is attempted.
+With `ACTA_BACKUP` off, none of the S3 variables or the recipient are read and no upload is attempted.
 
 DuckDB 2.0 ships time zone, calendar and collation support as the `icu` extension instead of in the core, and the bundled
 build does not include it. The service therefore never sets a session time zone — `SET TimeZone` would make DuckDB try

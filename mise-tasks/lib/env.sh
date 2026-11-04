@@ -6,6 +6,7 @@
 #   die, note             one-line failure and progress output
 #   load_deploy_env       sources the committed, non-secret configuration
 #   age_key               reads the sops age private key out of 1Password
+#   backup_identity       reads the backup's age private key out of 1Password
 #   load_deploy_secrets   decrypts the credentials into shell variables
 #
 # Three files, named for their contents:
@@ -20,6 +21,7 @@ die() { echo "error: $*" >&2; exit 1; }
 note() { echo "==> $*"; }
 
 age_item="SOPS age key - acta"
+backup_item="Acta backup age key"
 
 # Non-secret configuration. Every task calls this; it never reads credentials.
 load_deploy_env() {
@@ -41,6 +43,16 @@ age_key() {
     command -v op >/dev/null || die "1Password CLI (op) not found (brew install 1password-cli)"
     op item get "$age_item" --reveal --fields "private key" \
         || die "could not read '$age_item' from 1Password"
+}
+
+# The private half of the key the hourly backup encrypts to. It exists to read
+# the archive back, and only that: the service holds the public recipient and
+# never the identity, so the server can write the backup but not open it. Only a
+# restore needs this, and a restore is therefore laptop work.
+backup_identity() {
+    command -v op >/dev/null || die "1Password CLI (op) not found (brew install 1password-cli)"
+    op item get "$backup_item" --reveal --fields password \
+        || die "could not read the private key of '$backup_item' from 1Password"
 }
 
 load_deploy_secrets() {

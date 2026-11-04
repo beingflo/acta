@@ -50,6 +50,10 @@ pub struct BackupOptions {
     pub prefix: String,
     pub minute: u32,
     pub allow_http: bool,
+    /// The age recipient every object is encrypted to. A public key: it can only
+    /// encrypt, so it is logged with the rest of the target. The matching
+    /// identity is not on the server at all, and is read only by `restore`.
+    pub recipient: Option<age::x25519::Recipient>,
 }
 
 impl Settings {
@@ -178,6 +182,23 @@ fn parse_backup() -> Result<BackupOptions, String> {
     let prefix = env_str("ACTA_S3_PREFIX", "");
     let minute = env_parse("ACTA_BACKUP_MINUTE", 3u32)?;
 
+    // The archive is never plaintext, so an enabled backup without a usable
+    // recipient is a startup error: a typo must fail the deploy, not quietly
+    // produce an archive that nobody can open. Parsing it here also keeps the
+    // failure at startup rather than in the first hourly pass. With backup off
+    // the variable is not read at all, like the bucket.
+    let recipient = if enabled {
+        let value = env_option("ACTA_BACKUP_AGE_RECIPIENT")
+            .ok_or("ACTA_BACKUP is on but ACTA_BACKUP_AGE_RECIPIENT is empty")?;
+        Some(
+            value
+                .parse()
+                .map_err(|e| format!("ACTA_BACKUP_AGE_RECIPIENT: {e}"))?,
+        )
+    } else {
+        None
+    };
+
     if minute > 59 {
         return Err("ACTA_BACKUP_MINUTE must be between 0 and 59".into());
     }
@@ -200,6 +221,7 @@ fn parse_backup() -> Result<BackupOptions, String> {
         prefix,
         minute,
         allow_http,
+        recipient,
     })
 }
 

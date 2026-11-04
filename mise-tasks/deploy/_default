@@ -10,6 +10,15 @@ load_deploy_env
 
 host="${ACTA_HOST:-eos}"
 s3_bucket="${ACTA_S3_BUCKET:-}"
+
+# The archive is encrypted and its recipient is public configuration, so it is
+# rendered into the unit like the bucket. The service refuses to start with
+# backup on and no recipient; say why here, where it can still be fixed, rather
+# than let the container refuse to come up.
+if [[ -n "$s3_bucket" && -z "${ACTA_BACKUP_AGE_RECIPIENT:-}" ]]; then
+    die "ACTA_BACKUP_AGE_RECIPIENT is empty; set the archive's age public key in .deploy.env"
+fi
+
 tag="$(date +%Y%m%d-%H%M%S)-$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
 image="localhost/acta:${tag}"
 
@@ -93,6 +102,7 @@ tunables=(
     "ACTA_TRASH_GC_INTERVAL_MS=600000"
     "ACTA_BACKUP=${ACTA_BACKUP}"
     "ACTA_BACKUP_MINUTE=3"
+    "ACTA_BACKUP_AGE_RECIPIENT="
     "ACTA_S3_BUCKET="
     "ACTA_S3_REGION="
     "ACTA_S3_ENDPOINT="

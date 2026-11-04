@@ -33,6 +33,17 @@ for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
     [[ -n "${!key:-}" ]] || die "${key} is missing from .deploy.secrets.enc"
 done
 [[ -n "${ACTA_S3_BUCKET:-}" ]] || die "ACTA_S3_BUCKET is empty; nothing to restore from"
+
+# The archive is encrypted, and its age identity lives only in 1Password: there
+# is deliberately no copy on the server, so a restore happens here and the data
+# is then seeded to the host. Read the private half, hand it to the binary in its
+# environment, and never write it to disk.
+identity="$(backup_identity)"
+[[ "$identity" == AGE-SECRET-KEY-1* ]] \
+    || die "the private key of '$backup_item' in 1Password is not an age identity"
+export ACTA_BACKUP_AGE_IDENTITY="$identity"
+unset identity
+
 export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY \
     ACTA_S3_BUCKET ACTA_S3_REGION ACTA_S3_ENDPOINT ACTA_S3_PREFIX ACTA_S3_ALLOW_HTTP
 
@@ -54,3 +65,4 @@ note "restoring into ${dir}"
 ACTA_DATA_DIR="$dir" cargo run --release --manifest-path service/Cargo.toml -- "${args[@]}"
 
 note "serve it with: ACTA_DATA_DIR=${dir} mise run service:dev"
+note "to replace the server's volume with it: mise run deploy:seed ${dir}"

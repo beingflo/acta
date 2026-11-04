@@ -14,12 +14,21 @@
 //! asking the bucket. That row is what the dashboard reads; it cannot outlive the
 //! process, so an optional heartbeat URL is pinged after every error-free pass
 //! and a monitor alarms when the pings stop.
+//!
+//! Every object is encrypted to an age recipient before it leaves the host, so
+//! the bucket holds ciphertext and the provider can store the archive without
+//! being able to read it. The recipient is a public key, held in the
+//! configuration and logged with the rest of the target; the matching identity is
+//! nowhere on the server, so only a machine that can unlock the vault can read
+//! the archive back (see `restore`). Objects carry a [`SUFFIX`], which is what
+//! makes an object that is not ciphertext obvious by name rather than a guess.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use age::x25519;
 use chrono::{DateTime, Timelike, Utc};
 use futures::StreamExt;
 use object_store::aws::{AmazonS3, AmazonS3Builder};
@@ -33,6 +42,11 @@ use crate::storage;
 
 /// The source the backup's own reports are filed under: one row per pass.
 const SOURCE: &str = "acta-backup";
+
+/// Suffix every uploaded object carries, so the bucket says by itself that an
+/// object is ciphertext. A name without it is an archive from before the backup
+/// was encrypted, not something restore should guess about.
+const SUFFIX: &str = ".age";
 
 /// Run one pass at startup, then one per hour at `minute` past the hour.
 ///
@@ -91,11 +105,18 @@ fn client(opts: &BackupOptions) -> Result<Arc<AmazonS3>, String> {
     // every hour.
     static ANNOUNCED: std::sync::Once = std::sync::Once::new();
     ANNOUNCED.call_once(|| {
+        // The recipient is public, so it is logged in full: this line is how a
+        // deploy is checked against the key in the vault, and a wrong key has no
+        // other symptom before a restore is attempted.
         info!(
             bucket = %opts.bucket,
             region = %opts.region,
             endpoint = opts.endpoint.as_deref().unwrap_or("aws"),
             prefix = %opts.prefix,
+            recipient = %opts
+                .recipient
+                .as_ref()
+                .map_or_else(|| "none".to_string(), std::string::ToString::to_string),
             "backup target"
         );
     });
@@ -113,6 +134,59 @@ fn client(opts: &BackupOptions) -> Result<Arc<AmazonS3>, String> {
         .build()
         .map(Arc::new)
         .map_err(|e| format!("s3 client: {e}"))
+}
+
+/// Encrypt one whole file to the backup recipient.
+///
+/// `age` works on a whole buffer in memory and spends its time on the CPU, so it
+/// runs on the blocking pool: a tier file is a few megabytes today, but nothing
+/// in here is asynchronous and the upload task should not depend on the files
+/// staying small.
+async fn encrypt(
+    recipient: &x25519::Recipient,
+    name: &str,
+    bytes: Vec<u8>,
+) -> Result<Vec<u8>, String> {
+    let recipient = recipient.clone();
+    let name = name.to_string();
+    tokio::task::spawn_blocking(move || age::encrypt(&recipient, &bytes).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| format!("{name}: encrypt task: {e}"))?
+        .map_err(|e| format!("{name}: encrypt: {e}"))
+}
+
+/// Decrypt one object back into the file it was uploaded from.
+async fn decrypt(
+    identity: &x25519::Identity,
+    name: &str,
+    bytes: Vec<u8>,
+) -> Result<Vec<u8>, String> {
+    let identity = identity.clone();
+    let name = name.to_string();
+    tokio::task::spawn_blocking(move || age::decrypt(&identity, &bytes).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| format!("{name}: decrypt task: {e}"))?
+        .map_err(|e| format!("{name}: decrypt: {e}"))
+}
+
+/// The backup's age identity, read where it is used and never carried in
+/// `BackupOptions`, which is logged: it is the one secret that makes the archive
+/// readable, and it is deliberately not installed on the server. Restore is
+/// therefore something only a machine with the vault can do.
+fn identity() -> Result<x25519::Identity, String> {
+    let value = config::env_option("ACTA_BACKUP_AGE_IDENTITY").ok_or(
+        "ACTA_BACKUP_AGE_IDENTITY is not set; the archive can only be read with the backup's age \
+         identity",
+    )?;
+    value
+        .parse()
+        .map_err(|e| format!("ACTA_BACKUP_AGE_IDENTITY: {e}"))
+}
+
+/// The local name behind an object key. Everything that reasons about a name —
+/// supersession, the destination path — wants the name the file had on disk.
+fn stem(object: &str) -> Option<&str> {
+    object.strip_suffix(SUFFIX)
 }
 
 async fn run_once(
@@ -156,17 +230,25 @@ async fn run_once(
         }
     }
 
+    // Present whenever backup is enabled: `parse_backup` refuses to start
+    // otherwise, so a pass never gets this far without one.
+    let recipient = opts
+        .recipient
+        .as_ref()
+        .ok_or("ACTA_BACKUP_AGE_RECIPIENT is not set")?;
+
     let mut uploaded = 0usize;
     for (name, path) in wanted {
-        let key = object_key(opts, &name);
+        let key = object_key(opts, &format!("{name}{SUFFIX}"));
         if existing.contains(&key) {
             continue;
         }
         let bytes = tokio::fs::read(&path)
             .await
             .map_err(|e| format!("{}: {e}", path.display()))?;
+        let ciphertext = encrypt(recipient, &name, bytes).await?;
         store
-            .put(&key, PutPayload::from(bytes))
+            .put(&key, PutPayload::from(ciphertext))
             .await
             .map_err(|e| format!("put {key}: {e}"))?;
         uploaded += 1;
@@ -269,8 +351,8 @@ pub fn heartbeat_configured() -> bool {
     config::env_option("ACTA_BACKUP_PING_URL").is_some()
 }
 
-/// Download the backed-up objects into `data_dir`, coarsest tier first. Existing
-/// files are kept unless `force` is set.
+/// Download the backed-up objects into `data_dir`, decrypting them, coarsest tier
+/// first. Existing files are kept unless `force` is set.
 ///
 /// The backup is append-only, so a file and the coarser file built from it both
 /// stay in the bucket for good. Downloading both would only rewrite what the next
@@ -280,6 +362,7 @@ pub fn heartbeat_configured() -> bool {
 /// down at the fold) is restored from its finer files as before.
 pub async fn restore(data_dir: &Path, opts: &BackupOptions, force: bool) -> Result<(), String> {
     let store = client(opts)?;
+    let identity = identity()?;
     std::fs::create_dir_all(data_dir).map_err(|e| format!("{}: {e}", data_dir.display()))?;
 
     let prefix = prefix(opts);
@@ -292,14 +375,20 @@ pub async fn restore(data_dir: &Path, opts: &BackupOptions, force: bool) -> Resu
     // first download starts.
     let present: HashSet<String> = objects
         .iter()
-        .filter_map(|meta| meta.location.filename().map(str::to_owned))
+        .filter_map(|meta| meta.location.filename().and_then(stem).map(str::to_owned))
         .collect();
 
     let mut downloaded = 0usize;
     let mut superseded = 0usize;
     for meta in objects {
-        let Some(name) = meta.location.filename() else {
+        let Some(object) = meta.location.filename() else {
             continue;
+        };
+        let Some(name) = stem(object) else {
+            return Err(format!(
+                "{object}: not an encrypted object (no {SUFFIX} suffix); the bucket holds an \
+                 archive from before the backup was encrypted"
+            ));
         };
         if covered(name, &present) {
             superseded += 1;
@@ -310,13 +399,15 @@ pub async fn restore(data_dir: &Path, opts: &BackupOptions, force: bool) -> Resu
             info!(file = %dest.display(), "restore: keeping existing file");
             continue;
         }
-        let bytes = store
+        let ciphertext = store
             .get(&meta.location)
             .await
-            .map_err(|e| format!("get {name}: {e}"))?
+            .map_err(|e| format!("get {object}: {e}"))?
             .bytes()
             .await
-            .map_err(|e| format!("read {name}: {e}"))?;
+            .map_err(|e| format!("read {object}: {e}"))?
+            .to_vec();
+        let bytes = decrypt(&identity, name, ciphertext).await?;
         let tmp = data_dir.join(format!(".{name}.tmp"));
         tokio::fs::write(&tmp, &bytes)
             .await
@@ -387,7 +478,7 @@ fn until_next_run(minute: u32) -> Duration {
 mod tests {
     use std::collections::HashSet;
 
-    use super::{covered, shorten};
+    use super::{covered, shorten, stem};
     use crate::storage;
 
     fn set(names: &[&str]) -> HashSet<String> {
@@ -415,6 +506,32 @@ mod tests {
 
         // Files outside the tiers (`data.parquet`) are always fetched.
         assert!(!covered("data.parquet", &set(&[&month_name])));
+    }
+
+    #[tokio::test]
+    async fn an_object_decrypts_to_the_file_it_was_uploaded_from() {
+        let identity = age::x25519::Identity::generate();
+        let plaintext = b"PAR1 some made-up parquet bytes PAR1".to_vec();
+
+        let ciphertext = super::encrypt(
+            &identity.to_public(),
+            "day-2026-11-01.parquet",
+            plaintext.clone(),
+        )
+        .await
+        .expect("encrypt");
+        assert_ne!(ciphertext, plaintext);
+
+        let restored = super::decrypt(&identity, "day-2026-11-01.parquet", ciphertext)
+            .await
+            .expect("decrypt");
+        assert_eq!(restored, plaintext);
+    }
+
+    #[test]
+    fn a_name_without_the_suffix_is_not_an_object_of_this_archive() {
+        assert_eq!(stem("hour-1.parquet.age"), Some("hour-1.parquet"));
+        assert_eq!(stem("hour-1.parquet"), None);
     }
 
     #[test]
