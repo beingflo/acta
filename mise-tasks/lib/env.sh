@@ -21,7 +21,7 @@ die() { echo "error: $*" >&2; exit 1; }
 note() { echo "==> $*"; }
 
 age_item="SOPS age key - acta"
-backup_item="Acta backup age key"
+backup_item="age backup key - acta"
 
 # Non-secret configuration. Every task calls this; it never reads credentials.
 load_deploy_env() {
@@ -51,7 +51,7 @@ age_key() {
 # restore needs this, and a restore is therefore laptop work.
 backup_identity() {
     command -v op >/dev/null || die "1Password CLI (op) not found (brew install 1password-cli)"
-    op item get "$backup_item" --reveal --fields password \
+    op item get "$backup_item" --reveal --fields "private key" \
         || die "could not read the private key of '$backup_item' from 1Password"
 }
 
