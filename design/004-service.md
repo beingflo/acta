@@ -245,7 +245,10 @@ Every pass reports itself. One row is written to the `acta-backup` source whethe
 the bucket measured *before* the pass uploaded anything, which is how a compaction that stopped producing files shows
 up even though every pass still succeeds. The dashboard reads "when did the backup last work" off these rows, so the
 answer lives in the archive rather than in a log line that scrolls away. A pass that fails is logged at `error!`
-rather than `warn!`, because a warning that repeats hourly for a month is read by nobody.
+rather than `warn!`, because a warning that repeats hourly for a month is read by nobody. That line carries the
+provider error with every cause it wraps — `object_store` and `reqwest` each print only their own layer, so whether
+the failure was resolution, connect or TLS would otherwise never reach the log. The row keeps both ends of it: the
+operation that failed and the cause.
 
 A failed pass is retried by the next one, including a failure to build the S3 client: the loop keeps running so the
 failure is reported and retried instead of leaving a healthy-looking process with no backups for the rest of its life.
@@ -296,9 +299,19 @@ The unit also joins the shared `acta-net` network declared by `acta-net.network`
 marending.dev's exporter can reach it at `http://acta:8080` without leaving the host. Caddy keeps using the
 loopback-published `127.0.0.1:8080`, and the network unit is installed by the same deploy. The network names its DNS
 upstream (`DNS=`): podman points every container on it at aardvark-dns, which answers container names itself but
-forwards everything else to the rootless namespace's copy of the host resolver. On a systemd-resolved host that is
-the unreachable `127.0.0.53` stub, so every external lookup inside the network hangs — which is how the S3 backup
-first failed.
+forwards everything else to that upstream. Left unset it inherits the rootless namespace's copy of the host resolver,
+which on a systemd-resolved host is the unreachable `127.0.0.53` stub, so every external lookup inside the network
+hangs — which is how the S3 backup first failed. Hence a pinned public IPv4 resolver rather than the LAN router: the
+namespace's addresses and routes are a snapshot taken when podman creates it, so a LAN address is reachable only
+while that snapshot still matches the host. A public one needs nothing but a default route.
+
+**The rootless namespace snapshot is the trap behind any external access.** podman builds it once, with pasta
+copying the host's addresses and routes at creation time, and never re-syncs. If the uplink appears after the first
+container starts — a boot where the USB Ethernet adapter is not enumerated, or a stale lease — the namespace ends up
+with no default route, aardvark cannot reach any upstream, and every lookup in the network fails with
+`Network is unreachable` while the host itself resolves fine. Recovering means recreating the namespace (stop every
+rootless container on a bridge network; it is rebuilt on the next start) with the uplink up, so the deploy's health
+check and a `podman unshare --rootless-netns ip -4 route` are worth reading first when the backup suddenly stops.
 
 **The container runs unprivileged and can gain nothing.** The image declares `USER 1000:1000` and the unit adds
 `UserNS=keep-id:uid=1000,gid=1000`, so container uid 1000 *is* the deploying host user: on disk nothing changes owner,

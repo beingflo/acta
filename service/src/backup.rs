@@ -133,7 +133,7 @@ fn client(opts: &BackupOptions) -> Result<Arc<AmazonS3>, String> {
     builder
         .build()
         .map(Arc::new)
-        .map_err(|e| format!("s3 client: {e}"))
+        .map_err(|e| format!("s3 client: {}", chain(&e)))
 }
 
 /// Encrypt one whole file to the backup recipient.
@@ -183,6 +183,34 @@ fn identity() -> Result<x25519::Identity, String> {
         .map_err(|e| format!("ACTA_BACKUP_AGE_IDENTITY: {e}"))
 }
 
+/// An error with the causes it wraps, as one line.
+///
+/// Every layer above the cause prints only itself: `object_store` says the request
+/// failed and `reqwest` says `error sending request` for any transport failure at
+/// all, which reads the same whether DNS answered, the port was refused or the
+/// certificate was rejected. The cause is one or more `source()` hops down, so it
+/// is collected here; without it a failed pass costs an ssh session and a
+/// `dig`/`nsenter` hunt to diagnose.
+fn chain(err: &(dyn std::error::Error + 'static)) -> String {
+    // Bounded: an error chain is a hand-built structure and can be deep or, in a
+    // buggy provider, cyclic.
+    const MAX: usize = 8;
+    let mut message = err.to_string();
+    let mut cause = err.source();
+    for _ in 0..MAX {
+        let Some(err) = cause else { break };
+        let text = err.to_string();
+        // A layer that repeats what it wraps (`reqwest` prints the message of the
+        // error it already forwarded) adds no information, only noise.
+        if !text.is_empty() && !message.ends_with(&text) {
+            message.push_str(": ");
+            message.push_str(&text);
+        }
+        cause = err.source();
+    }
+    message
+}
+
 /// The local name behind an object key. Everything that reasons about a name —
 /// supersession, the destination path — wants the name the file had on disk.
 fn stem(object: &str) -> Option<&str> {
@@ -202,7 +230,7 @@ async fn run_once(
     let mut newest: Option<DateTime<Utc>> = None;
     let mut listing = store.list(prefix.as_ref());
     while let Some(item) = listing.next().await {
-        let meta = item.map_err(|e| format!("list: {e}"))?;
+        let meta = item.map_err(|e| format!("list: {}", chain(&e)))?;
         newest = Some(newest.map_or(meta.last_modified, |at| at.max(meta.last_modified)));
         existing.insert(meta.location);
     }
@@ -250,7 +278,7 @@ async fn run_once(
         store
             .put(&key, PutPayload::from(ciphertext))
             .await
-            .map_err(|e| format!("put {key}: {e}"))?;
+            .map_err(|e| format!("put {key}: {}", chain(&e)))?;
         uploaded += 1;
         info!(key = %key, "uploaded");
     }
@@ -305,14 +333,20 @@ async fn report(ingest: &IngestHandle, result: &Result<Pass, String>, elapsed: D
 }
 
 /// One line, not a log: an error is a card's detail row and a value in the
-/// archive, so keep the head of it and say how much was dropped.
+/// archive, so it is cut to fit — keeping both ends, because the outermost layer
+/// says which operation failed and the innermost says why.
 fn shorten(err: &str) -> String {
     const MAX: usize = 200;
-    let mut head: String = err.chars().take(MAX).collect();
-    if err.chars().count() > MAX {
-        head.push('…');
+    const HEAD: usize = 80;
+    let chars: Vec<char> = err.chars().collect();
+    if chars.len() <= MAX {
+        return err.to_string();
     }
-    head
+    let tail = MAX - HEAD - 1;
+    let mut short: String = chars[..HEAD].iter().collect();
+    short.push('…');
+    short.extend(&chars[chars.len() - tail..]);
+    short
 }
 
 /// Ping the dead-man's switch after an error-free pass, if one is configured.
@@ -369,7 +403,7 @@ pub async fn restore(data_dir: &Path, opts: &BackupOptions, force: bool) -> Resu
     let mut objects = Vec::new();
     let mut listing = store.list(prefix.as_ref());
     while let Some(item) = listing.next().await {
-        objects.push(item.map_err(|e| format!("list: {e}"))?);
+        objects.push(item.map_err(|e| format!("list: {}", chain(&e)))?);
     }
     // Names only: supersession is decided against the whole bucket before the
     // first download starts.
@@ -402,10 +436,10 @@ pub async fn restore(data_dir: &Path, opts: &BackupOptions, force: bool) -> Resu
         let ciphertext = store
             .get(&meta.location)
             .await
-            .map_err(|e| format!("get {object}: {e}"))?
+            .map_err(|e| format!("get {object}: {}", chain(&e)))?
             .bytes()
             .await
-            .map_err(|e| format!("read {object}: {e}"))?
+            .map_err(|e| format!("read {object}: {}", chain(&e)))?
             .to_vec();
         let bytes = decrypt(&identity, name, ciphertext).await?;
         let tmp = data_dir.join(format!(".{name}.tmp"));
@@ -478,7 +512,7 @@ fn until_next_run(minute: u32) -> Duration {
 mod tests {
     use std::collections::HashSet;
 
-    use super::{covered, shorten, stem};
+    use super::{chain, covered, shorten, stem};
     use crate::storage;
 
     fn set(names: &[&str]) -> HashSet<String> {
@@ -535,6 +569,53 @@ mod tests {
     }
 
     #[test]
+    fn an_error_carries_the_causes_it_wraps() {
+        let err = Layer(
+            "list: Generic S3 error",
+            Some(Box::new(Layer(
+                "error sending request",
+                Some(Box::new(Layer(
+                    "client error (Connect)",
+                    Some(Box::new(Layer(
+                        "dns error: failed to lookup address information",
+                        None,
+                    ))),
+                ))),
+            ))),
+        );
+        assert_eq!(
+            chain(&err),
+            "list: Generic S3 error: error sending request: client error (Connect): dns error: \
+             failed to lookup address information"
+        );
+
+        // A layer repeating what it wraps is not repeated in turn.
+        let echoed = Layer(
+            "error sending request",
+            Some(Box::new(Layer("error sending request", None))),
+        );
+        assert_eq!(chain(&echoed), "error sending request");
+    }
+
+    /// One `source()` hop, for the chain test.
+    #[derive(Debug)]
+    struct Layer(&'static str, Option<Box<Layer>>);
+
+    impl std::fmt::Display for Layer {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(self.0)
+        }
+    }
+
+    impl std::error::Error for Layer {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            self.1
+                .as_deref()
+                .map(|err| err as &(dyn std::error::Error + 'static))
+        }
+    }
+
+    #[test]
     fn a_reported_error_is_one_short_line() {
         assert_eq!(
             shorten("put hour-1.parquet: 403 AccessDenied"),
@@ -542,15 +623,24 @@ mod tests {
         );
 
         // Long messages are cut, and the ellipsis says so rather than letting the
-        // row look like the whole error.
+        // row look like the whole error. Both ends survive: the operation and the
+        // cause are what a reader needs, the middle is the provider's prose.
         let long = "x".repeat(500);
         let cut = shorten(&long);
-        assert_eq!(cut.chars().count(), 201);
-        assert!(cut.ends_with('…'));
+        assert_eq!(cut.chars().count(), 200);
+        assert!(cut.contains('…'));
+
+        let chained = format!(
+            "list: {}: dns error: failed to lookup address",
+            "x".repeat(500)
+        );
+        let cut = shorten(&chained);
+        assert!(cut.starts_with("list: xxx"));
+        assert!(cut.ends_with("dns error: failed to lookup address"));
 
         // Counted in characters, not bytes: an accented provider message must
         // not panic on a slice boundary.
         let accented = "é".repeat(300);
-        assert_eq!(shorten(&accented).chars().count(), 201);
+        assert_eq!(shorten(&accented).chars().count(), 200);
     }
 }
