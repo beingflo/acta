@@ -325,6 +325,16 @@ restarting. `Containerfile`, `.containerignore` and `acta.container` hold the de
 compile wants roughly 8 CPUs and 12 GiB in the podman machine; afterwards the cargo target and npm caches reduce an
 ordinary change to a few seconds.
 
+Those cache mounts are mounted `sharing=locked` for the cargo registry and git trees, and that is load-bearing. A
+cache mount's id defaults to its target path, so every Rust project on this machine (marending.dev, mariotto, go,
+reflective too) shares this one registry cache — which is fine, except that cargo's cross-process lock is
+`$CARGO_HOME/.package-cache`, *outside* the mounted subdirectory and therefore private to each container. Two builds
+running at once could unpack the same crate into the same `registry/src/<crate>` and leave it half-written with its
+`.cargo-ok` marker in place, which fails much later as an unparsable manifest — or builds from missing files.
+`sharing=locked` makes the second build wait at the mount instead; the `target/` cache needs nothing because its
+`.cargo-lock` is inside it. Stopping the podman machine or killing a build mid-extraction does the same damage by
+itself, and `rm -rf` of `registry/src` inside a throwaway build is the repair.
+
 State lives in two places, neither of which a deploy touches:
 
 - `acta-data` (named volume) at `/data` — the Parquet tree, owned by podman and never a bind mount.

@@ -15,6 +15,18 @@ RUN --mount=type=cache,target=/usr/src/acta/ui/node_modules \
 # `duckdb` is built from its bundled amalgamation with g++ (no cmake/python).
 # The first build compiles it and is slow; afterwards the target cache keeps
 # dependency rebuilds to the `acta` crate itself.
+#
+# `sharing=locked` on the two cargo caches is load-bearing, not decoration. A
+# cache mount's id defaults to its target path, so every Rust project on this
+# machine (acta, marending.dev, mariotto, go, reflective) shares this one
+# registry cache — and cargo's cross-process lock is `$CARGO_HOME/.package-cache`,
+# which is *outside* the mounted subdirectory and therefore private to each
+# container. Two builds overlapping could unpack the same crate into the same
+# `registry/src/<crate>` at once, leaving a crate half-written with its
+# `.cargo-ok` marker in place — a manifest that cannot be parsed, or worse, a
+# build from missing files. `sharing=locked` makes the second build wait at the
+# mount instead (buildah#3820), which is what the `target/` cache gets for free
+# from the `.cargo-lock` inside it.
 FROM rust:bookworm AS builder
 WORKDIR /usr/src/acta/service
 
@@ -24,8 +36,8 @@ COPY service/Cargo.toml service/Cargo.lock ./
 COPY .cargo /usr/src/acta/.cargo
 # Prime the dependency cache with a throwaway binary, so a source-only change
 # does not invalidate the dependency layer.
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,target=/usr/src/acta/service/target \
     mkdir -p src && echo 'fn main() {}' > src/main.rs \
     && cargo build --release \
@@ -37,8 +49,8 @@ COPY service/src ./src
 # the package as fresh, skips the rebuild, and /tmp/acta stays the throwaway
 # binary from that layer — a container that exits 0 before logging anything.
 # The size check fails the build loudly if that ever happens again.
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,target=/usr/src/acta/service/target \
     find src -exec touch {} + \
     && cargo build --release \
