@@ -527,6 +527,72 @@ WHERE source = '${escape(source)}'
   AND timestamp <  TIMESTAMPTZ '${to.toISOString()}'`
 }
 
+/** The `eos board temperature` alert's own windows and thresholds. They mirror
+ *  `service/src/alerts.rs`, which decides the mails: the dashboard exists to show
+ *  what the check sees, so the two have to agree, and neither is configurable.
+ */
+export const BOARD_WARN_C = 35
+export const BOARD_CRIT_C = 40
+export const BOARD_WARN_HOLD_S = 3_600
+export const BOARD_CRIT_HOLD_S = 300
+export const BOARD_SETTLE_S = 600
+/** `stats/collect.py` posts one sample every ten seconds. */
+export const BOARD_SAMPLE_S = 10
+
+/** Scalars for the alerts dashboard. */
+export type BoardAlert = {
+  /** Samples in the hour-long window. */
+  samples: number
+  /** Newest sample anywhere in that window, in epoch seconds. */
+  newest: number | null
+  current: number | null
+  peak: number | null
+  /** The mean the warn and the crit level are decided on, with the sample count
+   *  of their window: a mean over a mostly-empty window is not a reading. */
+  mean_1h: number | null
+  n_1h: number
+  mean_5m: number | null
+  n_5m: number
+  /** The mean the alert clears on: back at or below the warn threshold. */
+  mean_settle: number | null
+  n_settle: number
+  /** First reading above the warn threshold in the window, epoch seconds. */
+  since: number | null
+}
+
+/**
+ * The board temperature check, as one row: the same query shape the service runs
+ * every minute, with the same windows `now` defines. Nothing here follows the
+ * range picker — this is the check as it stands right now, not a view of a chosen
+ * span.
+ */
+export function boardAlertSql(source: string, now: Date): string {
+  const ago = (seconds: number) => new Date(now.getTime() - seconds * 1_000).toISOString()
+  const from = ago(BOARD_WARN_HOLD_S)
+  const critFrom = ago(BOARD_CRIT_HOLD_S)
+  const settleFrom = ago(BOARD_SETTLE_S)
+  return `SELECT to_json(struct_pack(
+           samples := count(*),
+           newest := CAST(epoch(CAST(max(timestamp) AS TIMESTAMP)) AS BIGINT),
+           current := arg_max(v, CAST(timestamp AS TIMESTAMP)),
+           peak := max(v),
+           mean_1h := avg(v),
+           n_1h := count(*),
+           mean_5m := avg(v) FILTER (WHERE timestamp >= TIMESTAMPTZ '${critFrom}'),
+           n_5m := count(*) FILTER (WHERE timestamp >= TIMESTAMPTZ '${critFrom}'),
+           mean_settle := avg(v) FILTER (WHERE timestamp >= TIMESTAMPTZ '${settleFrom}'),
+           n_settle := count(*) FILTER (WHERE timestamp >= TIMESTAMPTZ '${settleFrom}'),
+           since := CAST(epoch(CAST(min(timestamp) FILTER (WHERE v > ${BOARD_WARN_C}) AS TIMESTAMP)) AS BIGINT)
+         ))::VARCHAR
+FROM (
+  SELECT timestamp, data.temp.board_c::DOUBLE AS v
+  FROM events
+  WHERE source = '${escape(source)}'
+    AND timestamp >= TIMESTAMPTZ '${from}'
+)
+WHERE v IS NOT NULL`
+}
+
 /** A source's row count within the window: what the acta table's source filter
  *  offers. `source` is a plain column, so this costs no payload decoding —
  *  unlike the request facets, this read stays fast on years of data. */

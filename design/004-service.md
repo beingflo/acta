@@ -124,6 +124,42 @@ generous; a service that is running but has stopped receiving data reports unhea
 path with an explicit ten-minute window, so file and row-group statistics prune the archive and only the live end
 is touched.
 
+## Alerts
+
+A background loop evaluates the hand-written threshold checks in `service/src/alerts.rs` — today one, the eos board
+temperature — at startup and then once a minute, and mails the transitions through the `notify` relay's `POST /alert`.
+The set is deliberately tiny and its thresholds, windows and levels are constants in the source: a new alert is another
+`check_*` function and one line in the tick, and changing a threshold is a redeploy. No rule store, no alert manager, no
+persistence.
+
+A check runs one query over a fixed lookback and returns a verdict; it never mails anything itself. The board
+temperature check reads `data.temp.board_c` of `eos-stats` — the hottest sensor the firmware exposes, the same reading
+the eos dashboard charts — and meets a level when the **mean** over that level's window exceeds the threshold: above
+35 °C over an hour warns, above 40 °C over five minutes is critical. A window holding less than half the samples it
+should (~5.5/min) is treated as a gap and meets no level, so a collector that has stopped is silence rather than an
+alarm; the uptime monitor on `/health` is what covers that case.
+
+The state around it is what keeps the mail volume small. A level mails once when it is first reached, a worse level
+mails again while the incident runs (`warn` then `crit`, never the reverse), and nothing mails while a level simply
+stays met. The incident ends with one recovery mail once the mean over the last ten minutes is back at or below 35 °C.
+That exit window is shorter than the entry window on purpose: after the board cools, the hour-long mean stays above the
+threshold for up to another hour, so exiting on the same window would delay the recovery mail by that much. It doubles
+as the hysteresis that stops a 35.1/34.9 flutter from mailing twice. The state is in memory only, so a restart during a
+trend mails once more — the harmless direction to be wrong in.
+
+Every firing and recovery also lands in the archive as one row of the `acta-alert` source, carrying the level, the
+reading, whether the relay accepted the mail and when. That is what the `alerts` dashboard reads, and it is the only
+place a refused mail is visible.
+
+Delivery is a `POST` to `ACTA_ALERT_URL` — `http://notify:8080/alert` on the shared `acta-net` network, where
+aardvark-dns answers the container name, so no TLS and no DNS upstream are in the path — with
+`Authorization: Bearer $ACTA_ALERT_TOKEN`. That token is the relay's own `ALERT_TOKEN`, not a second copy of it: the
+deploy reads the `notify-alert-token` podman secret that notify's `deploy:secrets` installs, and drops the unit's
+`Secret=` line when it is absent, so the two checkouts stay decoupled. With no URL or no token the loop does not start
+and one warning says so: alerting off is a configuration, never a half-configuration. A send that fails is logged at
+`error!` and the incident is left un-fired, so the next tick tries again instead of swallowing the alert. A rotated
+token only reaches this container on a restart, because a running container keeps the environment it started with.
+
 ## Data ingestion
 
 `POST /api/ingest` takes a JSON array of `{ source, timestamp?, data }`. `source` names the data source, `data` is
@@ -325,6 +361,8 @@ spill location is `.tmp` inside it, so any sort that outgrows its memory limit �
 Credentials are podman secrets: `acta-auth-ui-user`/`-password`, `acta-auth-home-user`/`-password` (optional — omit both
 to run without the restricted viewer), `acta-auth-sensor-user`/`-password`,
 `acta-aws-key-id`, `acta-aws-secret` and `acta-backup-ping-url` (optional), installed with `mise run deploy:secrets`.
+The one credential that is not installed from this checkout is the alert relay's token: `notify-alert-token` belongs to
+notify, which creates it, and this deploy only reads it and drops the line when it is missing.
 The backup's age identity is deliberately not one of them: the service encrypts and never decrypts, so the private key
 stays in 1Password.
 Both halves of each auth pair are secrets, so a username never appears in the unit either. The values are committed as
@@ -420,6 +458,16 @@ secrets, so the deploy always enables authentication.
 | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` | unset | Required when backup is on. |
 
 With `ACTA_BACKUP` off, none of the S3 variables or the recipient are read and no upload is attempted.
+
+### Alerts
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ACTA_ALERT_URL` | unset | The relay's `/alert` route, as a full `http://` or `https://` URL; the deploy renders `http://notify:8080/alert`. Unset means no checks are evaluated at all. |
+| `ACTA_ALERT_TOKEN` | unset | Bearer token for that route: notify's own `ALERT_TOKEN`, installed on both sides as the podman secret `notify-alert-token`. Missing means no checks are evaluated, with one warning in the log. |
+
+There is nothing else to set: the checks themselves — reading, thresholds, windows, levels — are constants in
+`service/src/alerts.rs`, so a change to any of them is a redeploy.
 
 DuckDB 2.0 ships time zone, calendar and collation support as the `icu` extension instead of in the core, and the bundled
 build does not include it. The service therefore never sets a session time zone — `SET TimeZone` would make DuckDB try

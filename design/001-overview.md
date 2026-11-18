@@ -52,6 +52,11 @@ hourly itself — the closed hour file is uploaded to S3 as it closes, and day a
 append-only — so no external cron or backup tool is involved. See `design/004-service.md` for the deployment and
 backup details.
 
+It also watches a few of its own readings and mails when one crosses a threshold (the eos board temperature today).
+Those checks are hand-written functions evaluated in-process once a minute, and the mail goes through the small `notify`
+relay beside it. Thresholds and windows are code, so changing one is a redeploy — there is no rule store and no alert
+UI.
+
 ## Further reading
 
 Migration: `design/002-migration.md`

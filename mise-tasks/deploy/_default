@@ -56,6 +56,18 @@ if ssh "$host" 'podman secret exists acta-backup-ping-url' >/dev/null 2>&1; then
 else
     backup_ping=off
 fi
+# Threshold alerts mail through the notify relay, with that service's own token:
+# the secret is `notify-alert-token`, installed by notify's `deploy:secrets`, and
+# this deploy only reads it. Missing means alerting stays off (and the service
+# says so), never that the deploy fails — the two checkouts stay decoupled.
+if ssh "$host" 'podman secret exists notify-alert-token' >/dev/null 2>&1; then
+    alert_token=on
+else
+    alert_token=off
+fi
+
+[[ "$alert_token" == on ]] ||
+    echo "WARN: podman secret notify-alert-token is not installed: threshold alerts stay off (run 'mise run deploy:secrets' in the notify checkout)" >&2
 
 note "building ${image}"
 podman build -t "$image" .
@@ -108,6 +120,7 @@ tunables=(
     "ACTA_S3_ENDPOINT="
     "ACTA_S3_PREFIX="
     "ACTA_S3_ALLOW_HTTP=off"
+    "ACTA_ALERT_URL=http://notify:8080/alert"
 )
 
 config=""
@@ -126,6 +139,7 @@ sed_args=(-e "s|__TAG__|${tag}|g")
 [[ -n "$s3_bucket" ]] || sed_args+=(-e '/type=env,target=AWS_/d')
 [[ "$home_auth" == on ]] || sed_args+=(-e '/target=ACTA_AUTH_HOME_/d')
 [[ "$backup_ping" == on ]] || sed_args+=(-e '/target=ACTA_BACKUP_PING_URL/d')
+[[ "$alert_token" == on ]] || sed_args+=(-e '/target=ACTA_ALERT_TOKEN/d')
 sed "${sed_args[@]}" acta.container \
   | CONFIG="$config" awk '{ if ($0 == "__CONFIG__") print ENVIRON["CONFIG"]; else print }' \
   | ssh "$host" 'mkdir -p "$HOME/.config/containers/systemd" && cat > "$HOME/.config/containers/systemd/acta.container"'

@@ -1,3 +1,4 @@
+mod alerts;
 mod api;
 mod auth;
 mod backup;
@@ -54,7 +55,7 @@ async fn serve(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
         .await
         .map_err(std::io::Error::other)?;
 
-    let db = Db::open(settings.db.clone()).map_err(std::io::Error::other)?;
+    let db = Arc::new(Db::open(settings.db.clone()).map_err(std::io::Error::other)?);
     let data_lock = Arc::new(RwLock::new(()));
     let ingest = ingest::start(
         db.data_dir().to_path_buf(),
@@ -81,11 +82,21 @@ async fn serve(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
         auth = settings.auth.enabled(),
         backup = settings.backup.enabled,
         heartbeat = backup::heartbeat_configured(),
+        alerts = settings.alert_url.is_some(),
         "acta service starting"
     );
 
+    // Threshold alerts ride the same read pool and the same data lock as the API;
+    // with no relay configured the loop is not started at all.
+    tokio::spawn(alerts::run(
+        Arc::clone(&db),
+        ingest.handle(),
+        Arc::clone(&data_lock),
+        settings.alert_url,
+    ));
+
     let state = api::AppState {
-        db: Arc::new(db),
+        db,
         ingest: ingest.handle(),
         data_lock,
         ingest_max_batch: settings.write.ingest_max_batch,

@@ -50,6 +50,13 @@ Secret=acta-aws-secret,type=env,target=AWS_SECRET_ACCESS_KEY
 # this line when the secret is not installed. Its token is the credential —
 # anyone holding it could fake a ping — so it is a secret like the S3 keys.
 Secret=acta-backup-ping-url,type=env,target=ACTA_BACKUP_PING_URL
+# Threshold alerts mail through the notify relay, with that service's own token
+# rather than a second copy of it: `notify-alert-token` is the podman secret
+# notify authenticates `/alert` with, and it is notify's `deploy:secrets` that
+# installs it. The deploy drops this line when the secret is absent, and the
+# service then logs one warning and evaluates no checks. A rotated token reaches
+# this container only on a restart, since a running one keeps its environment.
+Secret=notify-alert-token,type=env,target=ACTA_ALERT_TOKEN
 
 [Service]
 Restart=on-failure

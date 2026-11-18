@@ -18,6 +18,10 @@ pub struct Settings {
     pub dashboard_refresh_seconds: u64,
     pub auth: Auth,
     pub backup: BackupOptions,
+    /// The `notify` relay's `/alert` route. Unset means no alerting at all; the
+    /// token that goes with it is a secret and is read by the alert loop itself,
+    /// never carried here, since this struct is logged.
+    pub alert_url: Option<String>,
 }
 
 /// Write path configuration.
@@ -101,6 +105,13 @@ impl Settings {
         let auth = parse_auth()?;
         let backup = parse_backup()?;
 
+        let alert_url = env_option("ACTA_ALERT_URL").filter(|url| !url.trim().is_empty());
+        if let Some(url) = &alert_url
+            && !(url.starts_with("http://") || url.starts_with("https://"))
+        {
+            return Err("ACTA_ALERT_URL must be a full http:// or https:// URL".into());
+        }
+
         let dashboard_refresh_seconds: u64 = env_parse("ACTA_DASHBOARD_REFRESH_SECONDS", 120)?;
         if !(10..=86_400).contains(&dashboard_refresh_seconds) {
             return Err("ACTA_DASHBOARD_REFRESH_SECONDS must be between 10 and 86400".into());
@@ -115,6 +126,7 @@ impl Settings {
             dashboard_refresh_seconds,
             auth,
             backup,
+            alert_url,
         })
     }
 }
