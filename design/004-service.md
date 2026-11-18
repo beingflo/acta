@@ -175,7 +175,8 @@ during a trend mails once more — the harmless direction to be wrong in.
 Every firing and recovery also lands in the archive as one row of the `acta-alert` source, carrying the rule id, the
 level, the reading, whether the relay accepted the mail and when. That is what the `alerts` dashboard reads, and it is
 the only place a refused mail is visible. The mail itself carries the source tag of the thing it is about — `acta-eos`,
-`acta-laundry` — so a filter has something to sort on, with the level in the severity field.
+`acta-laundry` — so a filter has something to sort on, with the level in the severity field. The relay sends alerts from
+`alerts@marending.dev` rather than the feedback alias, so the two are told apart by `From` alone.
 
 Delivery is a `POST` to `ACTA_ALERT_URL` — `http://notify:8080/alert` on the shared `acta-net` network, where
 aardvark-dns answers the container name, so no TLS and no DNS upstream are in the path — with

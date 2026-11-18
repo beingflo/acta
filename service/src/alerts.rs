@@ -621,10 +621,7 @@ fn mail(check: &Check, outcome: &Outcome, verdict: &Verdict) -> Option<(String, 
                     lowest.threshold,
                     check.unit,
                 ),
-                format!(
-                    "Checked every {}; a window with too few samples to average says nothing at all.\n",
-                    span(check.every)
-                ),
+                format!("Checked every {}.\n", span(check.every)),
             ]
             .concat();
             Some((
