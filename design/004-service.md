@@ -126,19 +126,38 @@ is touched.
 
 ## Alerts
 
-A background loop evaluates the threshold checks in `service/src/alerts.rs` at startup and then once a minute, and
-mails the transitions through the `notify` relay's `POST /alert`. There are two, both `Check` constants in that file:
+A background loop evaluates the checks in `service/src/alerts.rs` at startup and then each on its own cadence — a
+minute for the fast readings, ten for the laundry, thirty for the silence — and mails the transitions through the
+`notify` relay's `POST /alert`. There are three readings and one silence, all constants in that file:
 
-| Check | Reading | Marks | Clears |
-| --- | --- | --- | --- |
-| `eos_board_temp` | `eos-stats` `temp.board_c` | mean over 1 h above 35 °C warns; mean over 5 min above 40 °C is critical | mean over 10 min at or below 35 °C |
-| `laundry_humidity` | `humidity-laundry-room` `humidity` | mean over 5 min below 45 % warns | mean over 10 min at or above 45 % |
+| Check | Reading | Every | Marks | Clears |
+| --- | --- | --- | --- | --- |
+| `eos_board_temp` | `eos-stats` `temp.board_c` | 1 min | mean over 1 h above 35 °C warns; mean over 5 min above 40 °C is critical | mean over 10 min at or below 35 °C |
+| `laundry_humidity` | `humidity-laundry-room` `humidity` | 10 min | mean over 5 min below 45 % warns | mean over 10 min at or above 45 % |
+| `living_co2` | `co2-sensor-living-room` `co2` | 1 min | mean over 5 min above 1200 ppm warns | mean over 10 min at or below 1200 ppm |
+
+| Silence | Source | Every | Fires after | Clears on |
+| --- | --- | --- | --- | --- |
+| `location_silent` | `location_florian` | 30 min | two days without a sample | the next sample |
+
+The loop wakes every minute and runs whichever checks are due, so a cadence is a property of the check rather than of
+the loop. The laundry check reads a five-minute window every ten minutes, which means a dip shorter than the gap between
+two reads can fall between them — the price of not querying a room's humidity every minute, and an acceptable one for a
+reading that moves over tens of minutes. A restart makes every check due at once, so the first tick after one evaluates
+the lot.
 
 A check is one reading and the **marks** it can reach: a side (above or below), a threshold, and the window whose mean
 has to sit on that side. There is no rule store, no alert manager and no persistence — a new alert is another constant
 in `CHECKS`, and changing a threshold is a redeploy, which is the whole configuration surface this needs. The board
 temperature is the same field the eos dashboard charts, the hottest sensor the firmware exposes; laundry humidity below
 45 % is the humidifier having run out or the room simply drying.
+
+A silence is a second shape, and deliberately not a mark. The mean-over-a-window checks are silent exactly when
+there is no data, which is the right answer for a reading and the wrong one for a collector — a source that stops
+reporting can never raise one of them. `location_silent` reads the newest sample instead: nothing for two days mails
+once, the next sample ends it, and there is nothing to escalate to, so it has no marks, no settle window and its own
+few lines of state. Two days is the gap the Overland app leaves when it was not opened again after a restart; the
+lookback it reads is twice the threshold, far enough back to name the last sample in the mail.
 
 A check runs one query over its widest window and returns a verdict; it never mails anything itself. A window holding
 less than half the samples it should is a gap, and a mean over a gap meets no mark — so a collector that has stopped is

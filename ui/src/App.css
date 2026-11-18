@@ -432,6 +432,10 @@ body.fullscreen-tile {
   font-weight: 600;
   color: #111;
 }
+.alert-card-cadence {
+  font-size: 10px;
+  color: #b3b3b3;
+}
 .alert-card-level {
   margin-left: auto;
   font-size: 10px;

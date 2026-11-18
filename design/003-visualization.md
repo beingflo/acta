@@ -145,9 +145,13 @@ screen.
 ### alerts
 
 The threshold alerts the service evaluates and mails (`design/004-service.md`), as one card per alert — scalars only,
-because a check is a handful of numbers and nothing else. A card wears the level it is at and holds the reading now, the
+because a check is a handful of numbers and nothing else. A card wears the level it is at, names how often its check
+is evaluated — the numbers are only as fresh as that — and holds the reading now, the
 mean over each of the check's windows with the threshold that window is measured against, the window the alert clears
-on, and the highest or lowest reading of its lookback with the time the reading first crossed the threshold. The numbers
+on, and the highest or lowest reading of its lookback with the time the reading first crossed the threshold. A silence
+check — the GPS track that has not been heard from (`location_silent`) — shows how long the source has been quiet,
+when it was last heard from, and how many samples its lookback holds, since that is the whole of what "is it still
+reporting" can mean. The numbers
 sitting on the wrong side of their threshold are the ones painted red, so a card that is close reads as close without
 doing the arithmetic. A window that is mostly gap prints `—` for the same reason the check meets no mark on one: a mean
 over a gap is not a reading.

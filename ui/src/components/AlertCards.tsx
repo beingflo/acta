@@ -1,8 +1,14 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
 
 import { fetchData } from '../lib/api'
-import { formatAge, formatClock, formatNumber } from '../lib/format'
-import { ALERTS, type AlertCheck, type AlertSpec, alertCheckSql } from '../lib/query'
+import { formatAge, formatClock, formatNumber, formatTimestamp } from '../lib/format'
+import {
+  ALERTS,
+  type AlertCheck,
+  type AlertSpec,
+  type StaleCheck,
+  alertCheckSql,
+} from '../lib/query'
 import { range } from '../lib/range'
 import { autoRefresh } from '../lib/refresh'
 
@@ -23,14 +29,30 @@ const span = (seconds: number) =>
 const number = (value: number | null | undefined) => (value == null ? '—' : formatNumber(value))
 
 /** The level the service's check would reach, from the same means and the same
- *  covered windows: `unknown` is a lookback with nothing to average. */
+ *  windows: `unknown` is a lookback with nothing to average. */
 type Level = 'ok' | 'warn' | 'crit' | 'unknown'
 
-function levelOf(spec: AlertSpec, check: AlertCheck | null): Level {
-  if (!check || !check.marks.some((mark) => mark.mean != null)) return 'unknown'
+/** One check's answer, in whichever shape its spec asked for. */
+type Check = AlertCheck | StaleCheck
+
+const secondsAgo = (epoch: number) => Date.now() / 1_000 - epoch
+
+function levelOf(spec: AlertSpec, check: Check | null): Level {
+  if (check == null) return 'unknown'
+
+  if (spec.kind === 'stale') {
+    const stale = check as StaleCheck
+    // Nothing in the lookback is the longest silence there is, so it counts as
+    // silent rather than as unknown — the service says the same.
+    const silent = stale.newest == null || secondsAgo(stale.newest) >= spec.afterS
+    return silent ? 'warn' : 'ok'
+  }
+
+  const mean = check as AlertCheck
+  if (!mean.marks.some((mark) => mark.mean != null)) return 'unknown'
   let level: Level = 'ok'
   spec.marks.forEach((mark, index) => {
-    const read = check.marks[index]
+    const read = mean.marks[index]
     if (!read || read.mean == null) return
     if (!covered(read.n, mark.windowS, spec.sampleS)) return
     const met = mark.side === 'above' ? read.mean > mark.threshold : read.mean < mark.threshold
@@ -50,11 +72,11 @@ type Metric = {
   hot?: boolean
 }
 
-function metricsOf(spec: AlertSpec, check: AlertCheck | null): Metric[] {
+function meanMetrics(spec: AlertSpec & { kind: 'mean' }, check: AlertCheck | null): Metric[] {
   const side = spec.marks[0].side
   const lowest = spec.marks[0]
   const lookback = Math.max(spec.settleS, ...spec.marks.map((mark) => mark.windowS))
-  const newestAge = check?.newest == null ? null : Date.now() / 1_000 - check.newest
+  const newestAge = check?.newest == null ? null : secondsAgo(check.newest)
   const since = check?.since == null ? null : formatClock(check.since)
   const extreme = side === 'above' ? check?.highest : check?.lowest
   const mean = (read: { n: number; mean: number | null } | undefined, windowS: number) =>
@@ -109,7 +131,39 @@ function metricsOf(spec: AlertSpec, check: AlertCheck | null): Metric[] {
   ]
 }
 
-function Card(props: { spec: AlertSpec; check: AlertCheck | null }) {
+function staleMetrics(spec: AlertSpec & { kind: 'stale' }, check: StaleCheck | null): Metric[] {
+  const newest = check?.newest ?? null
+  const age = newest == null ? null : secondsAgo(newest)
+  const silent = age == null || age >= spec.afterS
+  const lookback = 2 * spec.afterS
+
+  return [
+    {
+      label: 'silent for',
+      value: age == null ? `> ${formatAge(lookback)}` : formatAge(age),
+      detail: `fires after ${formatAge(spec.afterS)}`,
+      hot: silent,
+    },
+    {
+      label: 'newest sample',
+      value: newest == null ? '—' : formatClock(newest),
+      // The day behind the clock, at the width the card has room for.
+      detail: newest == null ? 'nothing in the lookback' : formatTimestamp(newest, lookback * 1_000).slice(0, 10),
+    },
+    {
+      label: `samples, ${formatAge(lookback)}`,
+      value: check == null ? '—' : formatNumber(check.samples),
+      detail: 'any one clears it',
+    },
+  ]
+}
+
+function metricsOf(spec: AlertSpec, check: Check | null): Metric[] {
+  if (spec.kind === 'stale') return staleMetrics(spec, check as StaleCheck | null)
+  return meanMetrics(spec, check as AlertCheck | null)
+}
+
+function Card(props: { spec: AlertSpec; check: Check | null }) {
   const level = createMemo(() => levelOf(props.spec, props.check))
   const metrics = createMemo(() => metricsOf(props.spec, props.check))
 
@@ -123,6 +177,9 @@ function Card(props: { spec: AlertSpec; check: AlertCheck | null }) {
     >
       <header class="alert-card-head">
         <span class="alert-card-title">{props.spec.title}</span>
+        {/* A check reads on its own cadence, so the card says which: the numbers
+            are as fresh as this and no fresher. */}
+        <span class="alert-card-cadence">every {formatAge(props.spec.everyS)}</span>
         <span class="alert-card-level">{level()}</span>
       </header>
       <div class="alert-metrics">
@@ -149,17 +206,19 @@ function Card(props: { spec: AlertSpec; check: AlertCheck | null }) {
 }
 
 /**
- * Every alert the service evaluates, one card each: the level it is at, the
- * reading now, the mean over each of its windows with the threshold that window
- * is measured against, the window the alert clears on, and how far the lookback
- * went.
+ * Every alert the service evaluates, one card each: the level it is at and the
+ * numbers its check reads. A threshold check shows the reading now, the mean over
+ * each of its windows with the threshold that window is measured against, the
+ * window it clears on, and how far its lookback went; a silence check shows how
+ * long the source has been quiet, when it was last heard from, and how much would
+ * have to arrive to clear it.
  *
- * The windows are the checks' own, not the range picker's — a check always looks
- * at its last hour or ten minutes — so the cards read the same data every time,
- * whatever span the tables below are showing.
+ * The windows are the checks' own, not the range picker's, so the cards read the
+ * same data every time, whatever span the table below is showing — and each card
+ * names its check's cadence, because the numbers are only as fresh as that.
  */
 export default function AlertCards() {
-  const [checks, setChecks] = createSignal<(AlertCheck | null)[]>([])
+  const [checks, setChecks] = createSignal<(Check | null)[]>([])
   let requestId = 0
 
   const load = async () => {
@@ -168,7 +227,7 @@ export default function AlertCards() {
     const next = await Promise.all(
       ALERTS.map(async (spec) => {
         try {
-          return await fetchData<AlertCheck>(alertCheckSql(spec, now))
+          return await fetchData<Check>(alertCheckSql(spec, now))
         } catch (error) {
           console.warn(`alert check "${spec.id}" query failed`, error)
           return null
@@ -180,7 +239,7 @@ export default function AlertCards() {
 
   // Neither signal is read by the queries — the windows are the checks' own — but
   // a window the reader just changed is still a moment to read again, and the
-  // strip is about now.
+  // cards are about now.
   createEffect(() => {
     range()
     void load()

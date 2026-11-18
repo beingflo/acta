@@ -540,11 +540,18 @@ export type AlertMark = {
   side: 'above' | 'below'
 }
 
-export type AlertSpec = {
+type AlertBase = {
   /** The rule id the `acta-alert` rows carry. */
   id: string
   title: string
   source: string
+  /** How often the service evaluates it: the cards are as fresh as this. */
+  everyS: number
+}
+
+/** A reading watched over windows: the shape of every threshold check. */
+export type MeanAlert = AlertBase & {
+  kind: 'mean'
   /** Payload path: the query reads `data.<reading>`. */
   reading: string
   unit: string
@@ -557,9 +564,17 @@ export type AlertSpec = {
   sampleS: number
 }
 
+/** A source watched for silence: nothing arrived for longer than `afterS`.
+ *  There is nothing to average and nothing to escalate to — either it reported
+ *  or it did not. Mirrors the service's `Stale`. */
+export type StaleAlert = AlertBase & { kind: 'stale'; afterS: number }
+
+export type AlertSpec = MeanAlert | StaleAlert
+
 /** Every check the service runs, in the order it evaluates them. */
 export const ALERTS: AlertSpec[] = [
   {
+    kind: 'mean',
     id: 'eos_board_temp',
     title: 'eos board temperature',
     source: 'eos-stats',
@@ -571,8 +586,10 @@ export const ALERTS: AlertSpec[] = [
     ],
     settleS: 600,
     sampleS: 10,
+    everyS: 60,
   },
   {
+    kind: 'mean',
     id: 'laundry_humidity',
     title: 'laundry room humidity',
     source: 'humidity-laundry-room',
@@ -581,6 +598,27 @@ export const ALERTS: AlertSpec[] = [
     marks: [{ windowS: 300, threshold: 45, side: 'below' }],
     settleS: 600,
     sampleS: 30,
+    everyS: 600,
+  },
+  {
+    kind: 'mean',
+    id: 'living_co2',
+    title: 'living room CO₂',
+    source: 'co2-sensor-living-room',
+    reading: 'co2',
+    unit: 'ppm',
+    marks: [{ windowS: 300, threshold: 1_200, side: 'above' }],
+    settleS: 600,
+    sampleS: 30,
+    everyS: 60,
+  },
+  {
+    kind: 'stale',
+    id: 'location_silent',
+    title: 'location_florian',
+    source: 'location_florian',
+    afterS: 2 * 24 * 3_600,
+    everyS: 1_800,
   },
 ]
 
@@ -601,6 +639,9 @@ export type AlertCheck = {
   mean_settle: number | null
 }
 
+/** What a silence check reads: the newest sample, and how many came with it. */
+export type StaleCheck = { newest: number | null; samples: number }
+
 /**
  * One check, as one row — the same query the service runs every minute, with the
  * same windows `now` defines. Nothing here follows the range picker: it is the
@@ -608,6 +649,17 @@ export type AlertCheck = {
  */
 export function alertCheckSql(spec: AlertSpec, now: Date): string {
   const ago = (seconds: number) => new Date(now.getTime() - seconds * 1_000).toISOString()
+  if (spec.kind === 'stale') {
+    // Twice the threshold, like the service: far enough back to name the last
+    // sample, narrow enough for statistics to prune the archive.
+    return `SELECT to_json(struct_pack(
+           newest := CAST(epoch(CAST(max(timestamp) AS TIMESTAMP)) AS BIGINT),
+           samples := count(*)
+         ))::VARCHAR
+FROM events
+WHERE source = '${escape(spec.source)}'
+  AND timestamp >= TIMESTAMPTZ '${ago(2 * spec.afterS)}'`
+  }
   const lookback = Math.max(spec.settleS, ...spec.marks.map((mark) => mark.windowS))
   const lowest = spec.marks[0]
   const since = lowest.side === 'above' ? 'v >' : 'v <'
