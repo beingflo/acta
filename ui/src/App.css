@@ -582,6 +582,22 @@ body.fullscreen-tile {
   grid-template-rows: auto auto auto minmax(220px, 1fr);
 }
 
+/* The alerts dashboard is cards and then a table, with no chart between them, so
+   it needs its own two-row template: with the three-row one above, the table
+   landed in a content-sized row while the flexible row stayed empty. */
+.alerts.filled {
+  grid-template-rows: auto minmax(220px, 1fr);
+}
+
+/* Stacked, the cards take most of the height, and a table left with the viewport
+   remainder shows three rows. It gets a taller floor instead, and `main` scrolls
+   to reach the rest of it. */
+@media (max-width: 880px) {
+  .alerts.filled {
+    grid-template-rows: auto minmax(460px, 1fr);
+  }
+}
+
 .tile.table {
   display: flex;
   flex-direction: column;
