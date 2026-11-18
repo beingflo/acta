@@ -1,40 +1,27 @@
-import AlertChecks from '../components/AlertChecks'
+import AlertCards from '../components/AlertCards'
 import EventTable from '../components/EventTable'
-import TimeSeriesTile from '../components/TimeSeriesTile'
-import { TEMPERATURE } from '../lib/scale'
-
-/** The source the board temperature check reads: `stats/collect.py` on eos. */
-const SOURCE = 'eos-stats'
 
 /** The source the alert loop files its own firings and recoveries under. */
 const REPORT_SOURCE = 'acta-alert'
 
 /**
- * The threshold alerts (`service/src/alerts.rs`), as one page: the check's own
- * numbers right now, the reading it watches over the selected range, and what it
- * has mailed.
+ * The threshold alerts (`service/src/alerts.rs`) and what they have mailed.
  *
- * The strip above does not follow the range picker — its windows are the check's,
- * and a check always looks at the last hour — while the chart and the table do.
- * That is the split worth having: the strip answers "would it mail now", the
- * chart answers "how did it get here", and the table is the record of what
- * actually went out, including the mail the relay refused.
+ * Scalars only, grouped by alert: one card per check holding every number that
+ * check reads — its level, the reading now, the mean over each of its windows
+ * with the threshold beside it, the window it clears on, and how far the lookback
+ * went. A check is a handful of scalars and nothing else, so a card is the shape
+ * of the thing; the chart a dashboard would normally carry is on `eos` already,
+ * where the reading is explored rather than watched.
  *
- * One check and one tile per check: a second alert gets another strip and another
- * chart here, and nothing else about the dashboard changes.
+ * The cards do not follow the range picker — their windows are the checks' own —
+ * while the table does: it is the record of what actually went out, one row per
+ * firing and one per recovery, including a mail the relay refused.
  */
 export default function Alerts() {
   return (
     <div class="dashboard filled alerts">
-      <AlertChecks source={SOURCE} />
-      <TimeSeriesTile
-        wide
-        title="Board temperature"
-        source={SOURCE}
-        yLabel="Board [°C]"
-        yFit={TEMPERATURE}
-        series={[{ label: 'Board', expr: 'avg(data.temp.board_c::DOUBLE)' }]}
-      />
+      <AlertCards />
       <EventTable title="Firings and recoveries" source={REPORT_SOURCE} />
     </div>
   )

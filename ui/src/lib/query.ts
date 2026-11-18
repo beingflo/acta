@@ -527,68 +527,115 @@ WHERE source = '${escape(source)}'
   AND timestamp <  TIMESTAMPTZ '${to.toISOString()}'`
 }
 
-/** The `eos board temperature` alert's own windows and thresholds. They mirror
- *  `service/src/alerts.rs`, which decides the mails: the dashboard exists to show
- *  what the check sees, so the two have to agree, and neither is configurable.
+/**
+ * One alert the service evaluates. Mirrors the `Check` consts in
+ * `service/src/alerts.rs`: the dashboard exists to show what the checks see, so
+ * the two lists have to agree, and neither is configurable.
  */
-export const BOARD_WARN_C = 35
-export const BOARD_CRIT_C = 40
-export const BOARD_WARN_HOLD_S = 3_600
-export const BOARD_CRIT_HOLD_S = 300
-export const BOARD_SETTLE_S = 600
-/** `stats/collect.py` posts one sample every ten seconds. */
-export const BOARD_SAMPLE_S = 10
+export type AlertMark = {
+  /** The window the mean is taken over, in seconds. */
+  windowS: number
+  threshold: number
+  /** Which side of the threshold the window has to sit on, for how long. */
+  side: 'above' | 'below'
+}
 
-/** Scalars for the alerts dashboard. */
-export type BoardAlert = {
-  /** Samples in the hour-long window. */
-  samples: number
-  /** Newest sample anywhere in that window, in epoch seconds. */
+export type AlertSpec = {
+  /** The rule id the `acta-alert` rows carry. */
+  id: string
+  title: string
+  source: string
+  /** Payload path: the query reads `data.<reading>`. */
+  reading: string
+  unit: string
+  /** Ordered least severe first, like the service's marks. */
+  marks: AlertMark[]
+  /** The window the reading has to be back on the good side for. */
+  settleS: number
+  /** How often the source reports, which is what a window's expected sample
+   *  count is measured against. */
+  sampleS: number
+}
+
+/** Every check the service runs, in the order it evaluates them. */
+export const ALERTS: AlertSpec[] = [
+  {
+    id: 'eos_board_temp',
+    title: 'eos board temperature',
+    source: 'eos-stats',
+    reading: 'temp.board_c',
+    unit: '°C',
+    marks: [
+      { windowS: 3_600, threshold: 35, side: 'above' },
+      { windowS: 300, threshold: 40, side: 'above' },
+    ],
+    settleS: 600,
+    sampleS: 10,
+  },
+  {
+    id: 'laundry_humidity',
+    title: 'laundry room humidity',
+    source: 'humidity-laundry-room',
+    reading: 'humidity',
+    unit: '%',
+    marks: [{ windowS: 300, threshold: 45, side: 'below' }],
+    settleS: 600,
+    sampleS: 30,
+  },
+]
+
+/** What one check made of its lookback: the same row the service's check reads. */
+export type AlertCheck = {
+  /** Newest sample anywhere in the lookback, in epoch seconds. */
   newest: number | null
   current: number | null
-  peak: number | null
-  /** The mean the warn and the crit level are decided on, with the sample count
-   *  of their window: a mean over a mostly-empty window is not a reading. */
-  mean_1h: number | null
-  n_1h: number
-  mean_5m: number | null
-  n_5m: number
-  /** The mean the alert clears on: back at or below the warn threshold. */
-  mean_settle: number | null
-  n_settle: number
-  /** First reading above the warn threshold in the window, epoch seconds. */
+  /** The highest and the lowest reading in the lookback. */
+  highest: number | null
+  lowest: number | null
+  /** The first reading on the wrong side of the least severe threshold. */
   since: number | null
+  /** The mean and sample count of each mark's window, in the marks' order. */
+  marks: { n: number; mean: number | null }[]
+  /** The settle window: the mean the alert clears on. */
+  n_settle: number
+  mean_settle: number | null
 }
 
 /**
- * The board temperature check, as one row: the same query shape the service runs
- * every minute, with the same windows `now` defines. Nothing here follows the
- * range picker — this is the check as it stands right now, not a view of a chosen
- * span.
+ * One check, as one row — the same query the service runs every minute, with the
+ * same windows `now` defines. Nothing here follows the range picker: it is the
+ * check as it stands right now, not a view of a chosen span.
  */
-export function boardAlertSql(source: string, now: Date): string {
+export function alertCheckSql(spec: AlertSpec, now: Date): string {
   const ago = (seconds: number) => new Date(now.getTime() - seconds * 1_000).toISOString()
-  const from = ago(BOARD_WARN_HOLD_S)
-  const critFrom = ago(BOARD_CRIT_HOLD_S)
-  const settleFrom = ago(BOARD_SETTLE_S)
+  const lookback = Math.max(spec.settleS, ...spec.marks.map((mark) => mark.windowS))
+  const lowest = spec.marks[0]
+  const since = lowest.side === 'above' ? 'v >' : 'v <'
+  const marks = spec.marks
+    .map((mark) => {
+      const from = ago(mark.windowS)
+      return `struct_pack(
+           n := count(*) FILTER (WHERE timestamp >= TIMESTAMPTZ '${from}'),
+           mean := avg(v) FILTER (WHERE timestamp >= TIMESTAMPTZ '${from}')
+         )`
+    })
+    .join(',\n         ')
+  const settleFrom = ago(spec.settleS)
   return `SELECT to_json(struct_pack(
-           samples := count(*),
            newest := CAST(epoch(CAST(max(timestamp) AS TIMESTAMP)) AS BIGINT),
            current := arg_max(v, CAST(timestamp AS TIMESTAMP)),
-           peak := max(v),
-           mean_1h := avg(v),
-           n_1h := count(*),
-           mean_5m := avg(v) FILTER (WHERE timestamp >= TIMESTAMPTZ '${critFrom}'),
-           n_5m := count(*) FILTER (WHERE timestamp >= TIMESTAMPTZ '${critFrom}'),
-           mean_settle := avg(v) FILTER (WHERE timestamp >= TIMESTAMPTZ '${settleFrom}'),
+           highest := max(v),
+           lowest := min(v),
+           since := CAST(epoch(CAST(min(timestamp) FILTER (WHERE ${since} ${lowest.threshold}) AS TIMESTAMP)) AS BIGINT),
+           marks := [${marks}],
            n_settle := count(*) FILTER (WHERE timestamp >= TIMESTAMPTZ '${settleFrom}'),
-           since := CAST(epoch(CAST(min(timestamp) FILTER (WHERE v > ${BOARD_WARN_C}) AS TIMESTAMP)) AS BIGINT)
+           mean_settle := avg(v) FILTER (WHERE timestamp >= TIMESTAMPTZ '${settleFrom}')
          ))::VARCHAR
 FROM (
-  SELECT timestamp, data.temp.board_c::DOUBLE AS v
+  SELECT timestamp, data.${spec.reading}::DOUBLE AS v
   FROM events
-  WHERE source = '${escape(source)}'
-    AND timestamp >= TIMESTAMPTZ '${from}'
+  WHERE source = '${escape(spec.source)}'
+    AND timestamp >= TIMESTAMPTZ '${ago(lookback)}'
 )
 WHERE v IS NOT NULL`
 }

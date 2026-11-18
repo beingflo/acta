@@ -144,16 +144,18 @@ screen.
 
 ### alerts
 
-The threshold alerts the service evaluates and mails (`design/004-service.md`), as one page per check. The strip above
-shows the board temperature check as it stands right now — the level it adds up to, the newest reading, the mean over
-each of the check's three windows, the hour's peak and the sample counts behind them — and it deliberately ignores the
-date range picker: its windows are the check's own, because a check always looks at the last hour. A thin window reads
-`—` for the same reason the check meets no level on one: a mean over a gap is not a reading.
+The threshold alerts the service evaluates and mails (`design/004-service.md`), as one card per alert — scalars only,
+because a check is a handful of numbers and nothing else. A card wears the level it is at and holds the reading now, the
+mean over each of the check's windows with the threshold that window is measured against, the window the alert clears
+on, and the highest or lowest reading of its lookback with the time the reading first crossed the threshold. The numbers
+sitting on the wrong side of their threshold are the ones painted red, so a card that is close reads as close without
+doing the arithmetic. A window that is mostly gap prints `—` for the same reason the check meets no mark on one: a mean
+over a gap is not a reading.
 
-Below it the board temperature over the selected range, so the strip's verdict can be traced back to the reading that
-produced it, and then a table of the `acta-alert` rows the alert loop files about itself: one per firing and one per
-recovery, with the level, the reading, and whether the relay accepted the mail. A mail the relay refused is a row with
-`delivered: false`, which is the one case no notification can report.
+The cards do not follow the date range picker — their windows are the checks' own, and a check always looks at its last
+hour or ten minutes — while the table below does: it is the record of what actually went out, one row per firing and one
+per recovery, with the rule, the level, the reading, and whether the relay accepted the mail. A mail the relay refused is
+a row with `delivered: false`, which is the one case no notification can report.
 
 ### eos
 

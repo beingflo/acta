@@ -126,30 +126,37 @@ is touched.
 
 ## Alerts
 
-A background loop evaluates the hand-written threshold checks in `service/src/alerts.rs` — today one, the eos board
-temperature — at startup and then once a minute, and mails the transitions through the `notify` relay's `POST /alert`.
-The set is deliberately tiny and its thresholds, windows and levels are constants in the source: a new alert is another
-`check_*` function and one line in the tick, and changing a threshold is a redeploy. No rule store, no alert manager, no
-persistence.
+A background loop evaluates the threshold checks in `service/src/alerts.rs` at startup and then once a minute, and
+mails the transitions through the `notify` relay's `POST /alert`. There are two, both `Check` constants in that file:
 
-A check runs one query over a fixed lookback and returns a verdict; it never mails anything itself. The board
-temperature check reads `data.temp.board_c` of `eos-stats` — the hottest sensor the firmware exposes, the same reading
-the eos dashboard charts — and meets a level when the **mean** over that level's window exceeds the threshold: above
-35 °C over an hour warns, above 40 °C over five minutes is critical. A window holding less than half the samples it
-should (~5.5/min) is treated as a gap and meets no level, so a collector that has stopped is silence rather than an
-alarm; the uptime monitor on `/health` is what covers that case.
+| Check | Reading | Marks | Clears |
+| --- | --- | --- | --- |
+| `eos_board_temp` | `eos-stats` `temp.board_c` | mean over 1 h above 35 °C warns; mean over 5 min above 40 °C is critical | mean over 10 min at or below 35 °C |
+| `laundry_humidity` | `humidity-laundry-room` `humidity` | mean over 5 min below 45 % warns | mean over 10 min at or above 45 % |
 
-The state around it is what keeps the mail volume small. A level mails once when it is first reached, a worse level
-mails again while the incident runs (`warn` then `crit`, never the reverse), and nothing mails while a level simply
-stays met. The incident ends with one recovery mail once the mean over the last ten minutes is back at or below 35 °C.
-That exit window is shorter than the entry window on purpose: after the board cools, the hour-long mean stays above the
-threshold for up to another hour, so exiting on the same window would delay the recovery mail by that much. It doubles
-as the hysteresis that stops a 35.1/34.9 flutter from mailing twice. The state is in memory only, so a restart during a
-trend mails once more — the harmless direction to be wrong in.
+A check is one reading and the **marks** it can reach: a side (above or below), a threshold, and the window whose mean
+has to sit on that side. There is no rule store, no alert manager and no persistence — a new alert is another constant
+in `CHECKS`, and changing a threshold is a redeploy, which is the whole configuration surface this needs. The board
+temperature is the same field the eos dashboard charts, the hottest sensor the firmware exposes; laundry humidity below
+45 % is the humidifier having run out or the room simply drying.
 
-Every firing and recovery also lands in the archive as one row of the `acta-alert` source, carrying the level, the
-reading, whether the relay accepted the mail and when. That is what the `alerts` dashboard reads, and it is the only
-place a refused mail is visible.
+A check runs one query over its widest window and returns a verdict; it never mails anything itself. A window holding
+less than half the samples it should is a gap, and a mean over a gap meets no mark — so a collector that has stopped is
+silence rather than an alarm, and the uptime monitor on `/health` is what covers that case. The expected sample rate is
+per check, because the sources differ: `eos-stats` posts every 10 s, the laundry sensor roughly every 30 s.
+
+The state around it is what keeps the mail volume small. A mark mails once when it is first reached, a worse one mails
+again while the incident runs (never the reverse), and nothing mails while a mark simply stays met. The incident ends
+with one recovery mail once the reading has been back on the good side for the check's settle window — ten minutes for
+both. That exit window is shorter than the widest entry window on purpose: after the board cools, the hour-long mean
+stays above its threshold for up to another hour, so exiting on the same window would delay the recovery mail by that
+much. It doubles as the hysteresis that stops a flutter from mailing twice. The state is in memory only, so a restart
+during a trend mails once more — the harmless direction to be wrong in.
+
+Every firing and recovery also lands in the archive as one row of the `acta-alert` source, carrying the rule id, the
+level, the reading, whether the relay accepted the mail and when. That is what the `alerts` dashboard reads, and it is
+the only place a refused mail is visible. The mail itself carries the source tag of the thing it is about — `acta-eos`,
+`acta-laundry` — so a filter has something to sort on, with the level in the severity field.
 
 Delivery is a `POST` to `ACTA_ALERT_URL` — `http://notify:8080/alert` on the shared `acta-net` network, where
 aardvark-dns answers the container name, so no TLS and no DNS upstream are in the path — with

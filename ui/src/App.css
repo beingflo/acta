@@ -395,6 +395,101 @@ body.fullscreen-tile {
   color: #b5837c;
 }
 
+/* The alerts dashboard: one larger card per alert, holding the scalars its check
+   reads. Two alerts sit side by side; on a narrow screen they stack. */
+.alert-cards {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 10px;
+}
+.alert-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  background: #fff;
+  border: 1px solid #eeeeee;
+  border-radius: 4px;
+}
+/* A card that is at a level wears the same pair of colours the summary cards
+   use for a reading worth noticing, one step stronger for critical. */
+.alert-card-warn {
+  background: #fdf8f2;
+  border-color: #e6cfb6;
+}
+.alert-card-crit {
+  background: #fdf3f2;
+  border-color: #e6bdb6;
+}
+.alert-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.alert-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #111;
+}
+.alert-card-level {
+  margin-left: auto;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6e6e6e;
+}
+.alert-card-warn .alert-card-level {
+  color: #a86a2a;
+}
+.alert-card-crit .alert-card-level {
+  color: #a33;
+}
+.alert-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 8px 12px;
+}
+.alert-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.alert-metric-label {
+  font-size: 10px;
+  color: #6e6e6e;
+}
+.alert-metric-value {
+  font-size: 17px;
+  font-weight: 500;
+  color: #111;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.alert-metric-unit {
+  margin-left: 3px;
+  font-size: 10px;
+  font-weight: 400;
+  color: #6e6e6e;
+}
+.alert-metric-detail {
+  /* One line high even when empty, so a row of numbers keeps one baseline. */
+  min-height: 11px;
+  overflow: hidden;
+  font-size: 9.5px;
+  color: #999;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* The one number per window that is on the wrong side of its threshold. */
+.alert-metric-hot .alert-metric-label,
+.alert-metric-hot .alert-metric-unit {
+  color: #b5837c;
+}
+.alert-metric-hot .alert-metric-value {
+  color: #a33;
+}
+
 /* Cursor tooltip. It is a child of uPlot's `.u-over`, positioned with a
    transform from the crosshair; z-index must beat uPlot's own cursor lines
    and selection overlay, which sit at 100. */
